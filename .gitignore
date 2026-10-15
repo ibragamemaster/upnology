@@ -1,0 +1,31 @@
+node_modules
+dist
+.vite
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+
+# Local tooling, deployment metadata and review artifacts
+.vercel/
+.agents/
+.codex/
+.aws/
+.responsive-review/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+
+# Private credentials and local database exports
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.dump
+
+# Supabase CLI project links and temporary connection metadata
+supabase/.temp/
+supabase/.branches/

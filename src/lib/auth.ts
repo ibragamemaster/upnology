@@ -1,4 +1,5 @@
 import { getSupabaseClient } from './supabase'
+import { passwordResetRedirect, completePasswordRecovery } from './passwordRecovery'
 
 export function authError(message: string) {
   if (/invalid login credentials/i.test(message)) return 'Email o password non corretti.'
@@ -31,12 +32,11 @@ export async function signOut() {
 
 export async function sendPasswordReset(email: string) {
   const { error } = await getSupabaseClient().auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/reset-password`,
+    redirectTo: passwordResetRedirect(window.location.origin),
   })
   if (error) throw new Error(authError(error.message))
 }
 
 export async function updatePassword(password: string) {
-  const { error } = await getSupabaseClient().auth.updateUser({ password })
-  if (error) throw new Error(authError(error.message))
+  return completePasswordRecovery(getSupabaseClient(), password, window.sessionStorage)
 }

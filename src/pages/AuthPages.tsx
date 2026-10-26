@@ -8,7 +8,7 @@ import { hasAdminAccess } from '../lib/admin'
 type Mode = 'login' | 'signup' | 'forgot' | 'reset'
 
 export function AuthPage({ mode }: { mode: Mode }) {
-  const { user, loading } = useAuth()
+  const { user, loading, recovery } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -27,19 +27,24 @@ export function AuthPage({ mode }: { mode: Mode }) {
         else setNotice('Controlla la tua email per confermare l’account. Dopo la verifica potrai accedere.')
       }
       if (mode === 'forgot') { await sendPasswordReset(email); setNotice('Se esiste un account con questa email, riceverai un link per reimpostare la password.') }
-      if (mode === 'reset') { await updatePassword(password); setNotice('Password aggiornata. Ora puoi accedere al tuo account.') }
+      if (mode === 'reset') {
+        if (!recovery) throw new Error('Link non valido o scaduto. Richiedi un nuovo link.')
+        const result = await updatePassword(password)
+        setPassword('')
+        setNotice(result.signedOut ? 'Password aggiornata. Ora puoi accedere con la nuova password.' : 'Password aggiornata. La sessione è ancora aperta: esci dal tuo account prima di effettuare un nuovo login.')
+      }
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Operazione non riuscita.') }
     finally { setBusy(false) }
   }
-  if (mode === 'reset' && loading) return <main className="auth-shell"><p role="status">Verifica del link…</p></main>
-  if (mode === 'reset' && !user) return <main className="auth-shell"><div className="auth-card"><p className="eyebrow">Recupero password</p><h1>Link non valido o scaduto.</h1><p>Richiedi un nuovo link per reimpostare la password.</p><a className="button-primary" href="/forgot-password">Richiedi un nuovo link</a></div></main>
-  if (user && mode !== 'reset') return <main className="auth-shell"><div className="auth-card"><p className="eyebrow">Area cliente</p><h1>Hai già effettuato l’accesso.</h1><a className="button-primary" href="/account">Vai al tuo account</a></div></main>
+  if (mode === 'reset' && !notice && loading) return <main className="auth-shell"><p role="status">Verifica del link…</p></main>
+  if (mode === 'reset' && !notice && !recovery) return <main className="auth-shell"><div className="auth-card"><p className="eyebrow">Recupero password</p><h1>Link non valido o scaduto.</h1><p>Richiedi un nuovo link per reimpostare la password.</p><a className="button-primary" href="/forgot-password">Richiedi un nuovo link</a></div></main>
+  if (user && mode !== 'reset' && mode !== 'forgot') return <main className="auth-shell"><div className="auth-card"><p className="eyebrow">Area cliente</p><h1>Hai già effettuato l’accesso.</h1><a className="button-primary" href="/account">Vai al tuo account</a></div></main>
   return <main className="auth-shell"><div className="auth-card"><p className="eyebrow">Upnology / Area cliente</p><h1>{title}</h1><p className="auth-intro">{mode === 'signup' ? 'Le richieste preventivo restano accessibili anche senza account. Registrati per seguirne lo stato.' : mode === 'forgot' ? 'Ti invieremo un link per scegliere una nuova password.' : mode === 'reset' ? 'Inserisci una password nuova di almeno 8 caratteri.' : 'Visualizza le tue richieste e i progetti collegati.'}</p>
     {notice ? <div className="auth-notice" role="status">{notice}<p><a href="/login">Vai al login</a></p></div> : <form onSubmit={submit} className="auth-form">
       {mode === 'signup' && <label>Nome<input autoComplete="given-name" value={name} onChange={e => setName(e.target.value)} required minLength={2} maxLength={120}/></label>}
       {mode !== 'reset' && <label>Email<input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required maxLength={254}/></label>}
       {(mode === 'login' || mode === 'signup' || mode === 'reset') && <label>{mode === 'reset' ? 'Nuova password' : 'Password'}<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e => setPassword(e.target.value)} required minLength={8}/></label>}
-      {error && <p className="field-error" role="alert">{error}</p>}
+      {error && <p className="field-error" role="alert">{error}{mode === 'reset' && <> <a href="/forgot-password">Richiedi un nuovo link</a></>}</p>}
       <button className="button-primary" type="submit" disabled={busy}>{busy ? 'Attendi…' : { login: 'Accedi', signup: 'Crea account', forgot: 'Invia link', reset: 'Aggiorna password' }[mode]}</button>
     </form>}
     <div className="auth-links">{mode === 'login' ? <><a href="/forgot-password">Password dimenticata?</a><a href="/signup">Crea un account</a></> : <a href="/login">Torna al login</a>}</div>

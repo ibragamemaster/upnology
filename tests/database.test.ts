@@ -106,15 +106,22 @@ test('PostgreSQL: migrations, commercial lifecycle, security and idempotency', a
   await role(alice);const o=await find(offerId), m=o.milestones[phase-1]
   const attempt=attempts[phase-1]??await checkout(m.id); attempts[phase-1]=attempt
   await role(null,'service_role')
-  return svc('stripe_event',{attempt_id:attempt.id,session_id:`cs_test_${phase}`,event_id:eventId,event_type:'checkout.session.completed',state:'paid',amount_cents:attempt.amount_cents,currency:'eur',payment_intent:`pi_test_${phase}`,refunded_cents:0,...overrides})
+  return svc('stripe_event',{attempt_id:attempt.id,session_id:`cs_test_${phase}`,event_id:eventId,event_type:'checkout.session.completed',state:'paid',livemode:false,metadata:{application:'upnology',integration_version:'2',attempt_id:attempt.id,installment_id:m.id,milestone_id:m.id,quote_id:o.id,project_id:o.project_id,customer_id:alice},amount_cents:attempt.amount_cents,currency:'eur',payment_intent:`pi_test_${phase}`,refunded_cents:0,...overrides})
  }
  await t.test('checkout reuse, mismatch rollback, pending, failure, retries and verified first payment', async () => {
   await role(alice);const o=await find(offerId)
   const a=await checkout(o.milestones[0].id);assert.equal((await checkout(o.milestones[0].id)).id,a.id);attempts[0]=a
   await role(bob);await assert.rejects(()=>checkout(o.milestones[0].id),/Owner required/)
   await role(alice);await assert.rejects(()=>checkout(o.milestones[1].id),/not payable/)
+  await role(null,'service_role')
+  const binding={attempt_id:a.id,session_id:'cs_test_1',url:'https://checkout.stripe.com/test',amount_cents:a.amount_cents,currency:'eur',livemode:false,
+   metadata:{application:'upnology',integration_version:'2',attempt_id:a.id,installment_id:o.milestones[0].id,milestone_id:o.milestones[0].id,quote_id:o.id,project_id:o.project_id,customer_id:alice}}
+  await assert.rejects(()=>svc('checkout_bound',{...binding,amount_cents:1}),/mismatch/)
+  await svc('checkout_bound',binding)
   await assert.rejects(()=>pay(1,'evt_bad',{amount_cents:1}),/mismatch/)
+  await assert.rejects(()=>pay(1,'evt_wrong_project',{metadata:{application:'upnology',project_id:bob}}),/mismatch/)
   await pay(1,'evt_pending',{state:'pending'});await role(alice);assert.equal((await find(offerId)).milestones[0].status,'IN_ATTESA')
+  await assert.rejects(()=>pay(1,'evt_wrong_mode',{livemode:true}),/mismatch/)
   await pay(1,'evt_failed',{state:'failed',session_status:'open'});await role(alice);assert.equal((await find(offerId)).milestones[0].status,'FALLITO');assert.equal((await checkout(o.milestones[0].id)).id,a.id)
   await pay(1,'evt_paid_1'); await pay(1,'evt_paid_1');await pay(1,'evt_late_failure',{state:'failed'})
   await role(alice);const paid=await find(offerId);assert.equal(paid.milestones[0].status,'PAGATO');assert.equal(paid.project!.commercial_stage,'IN_LAVORAZIONE')
@@ -185,6 +192,17 @@ test('PostgreSQL: migrations, commercial lifecycle, security and idempotency', a
   for (const file of ['admin_base_transaction.sql','rls_customer_auth.sql']) {
    await db.exec((await readFile(`supabase/tests/${file}`,'utf8')).replace(/^\uFEFF/,''))
   }
+ })
+ await t.test('1000 EUR quote yields 300/400/300 and exact contract requiring explicit acceptance', async () => {
+  await role(admin)
+  const id=await createOffer({snapshot:{...snapshot,items:[{description:'Progetto completo',amount_cents:100000}],tax_bps:0}})
+  const draft=await find(id)
+  assert.equal(draft.total_cents,100000);assert.deepEqual(draft.snapshot.instalments,[30000,40000,30000])
+  await cmd('send',{offer_id:id});await role(alice);await cmd('accept',{offer_id:id,confirmed:true})
+  const accepted=await find(id)
+  assert.deepEqual(accepted.contract!.snapshot,accepted.snapshot)
+  assert.equal(accepted.contract!.accepted_at,null)
+  await assert.rejects(()=>checkout(accepted.milestones[0].id),/not payable/)
  })
  await db.close()
 })

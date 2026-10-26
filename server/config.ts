@@ -8,10 +8,14 @@ export function appOrigin() {
  if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/') throw new HttpError(503, 'APP_URL deve essere un’origine HTTPS.')
  return url.origin
 }
+// Server-only: prefer the new secret key, with legacy deployments supported.
+export function supabaseSecretKey() {
+ return process.env.SUPABASE_SECRET_KEY?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || undefined
+}
 export function features() {
  const backend = process.env.COMMERCIAL_ENABLED === 'true' && !!process.env.SUPABASE_URL && !!process.env.SUPABASE_ANON_KEY
- const payments = backend && process.env.STRIPE_ENABLED === 'true' && !!process.env.STRIPE_SECRET_KEY && !!process.env.STRIPE_WEBHOOK_SECRET && !!process.env.SUPABASE_SERVICE_ROLE_KEY && !!process.env.APP_URL && ['test', 'live'].includes(process.env.STRIPE_MODE ?? '')
- const email = backend && process.env.RESEND_ENABLED === 'true' && !!process.env.RESEND_API_KEY && !!process.env.RESEND_FROM && !!process.env.APP_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY
+ const payments = backend && process.env.STRIPE_ENABLED === 'true' && !!process.env.STRIPE_SECRET_KEY && !!process.env.STRIPE_WEBHOOK_SECRET && !!supabaseSecretKey() && !!process.env.APP_URL && ['test', 'live'].includes(process.env.STRIPE_MODE ?? '')
+ const email = backend && process.env.RESEND_ENABLED === 'true' && !!process.env.RESEND_API_KEY && !!process.env.RESEND_FROM && !!process.env.APP_URL && !!supabaseSecretKey()
  return { backend, payments, email, stripeMode: payments ? process.env.STRIPE_MODE : null }
 }
 export function protectedLink(raw: string) {

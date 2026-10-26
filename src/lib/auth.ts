@@ -32,7 +32,7 @@ export async function signOut() {
 
 export async function sendPasswordReset(email: string) {
   const { error } = await getSupabaseClient().auth.resetPasswordForEmail(email, {
-    redirectTo: passwordResetRedirect(window.location.origin),
+    redirectTo: passwordResetRedirect(),
   })
   if (error) throw new Error(authError(error.message))
 }

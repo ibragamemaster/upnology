@@ -1,9 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export const recoveryStorageKey = 'upnology-password-recovery'
-export function passwordResetRedirect(origin: string) {
- const url = new URL(origin)
- return `${['upnology.agency', 'www.upnology.agency'].includes(url.hostname) ? 'https://upnology.agency' : url.origin}/reset-password`
+export function passwordResetRedirect() {
+ // Recovery emails must remain usable on another device, including requests from local development.
+ return 'https://upnology.agency/reset-password'
 }
 export function recoveryCallback(href: string) {
  const url = new URL(href), hash = new URLSearchParams(url.hash.slice(1))

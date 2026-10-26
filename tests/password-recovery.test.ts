@@ -16,10 +16,8 @@ function client(options:{initializeError?:boolean;userError?:boolean;otpError?:b
   signOut:async(args:unknown)=>{assert.deepEqual(args,{scope:'local'});calls.push('signout');if(options.signoutError)throw new Error('offline');return {error:null}},
  }} as unknown as SupabaseClient}
 }
-test('recovery redirect uses canonical production host and preserves local/preview origins',()=>{
- assert.equal(passwordResetRedirect('https://www.upnology.agency'),'https://upnology.agency/reset-password')
- assert.equal(passwordResetRedirect('https://upnology.agency'),'https://upnology.agency/reset-password')
- assert.equal(passwordResetRedirect('http://localhost:5173'),'http://localhost:5173/reset-password')
+test('recovery redirect is the public HTTPS reset page without a browser-origin dependency',()=>{
+ assert.equal(passwordResetRedirect(),'https://upnology.agency/reset-password')
 })
 test('implicit recovery and expired callbacks are recognized without displaying provider tokens/errors',()=>{
  assert.equal(recoveryCallback('https://upnology.agency/#type=recovery&access_token=fixture').requested,true)

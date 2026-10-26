@@ -6,9 +6,9 @@ function submissionError(message: string) {
   return 'Non siamo riusciti a ricevere la richiesta. Riprova tra poco.'
 }
 
-export async function submitQuoteRequest(value: QuoteRequest): Promise<string> {
+export async function submitQuoteRequest(value: QuoteRequest, submissionId?: string): Promise<string> {
   const payload = quoteSchema.parse(value)
-  const { data, error } = await getSupabaseClient().rpc('submit_quote_request', { p_payload: payload })
+  const { data, error } = await getSupabaseClient().rpc('submit_quote_request', { p_payload: { ...payload, ...(submissionId ? { submission_id: submissionId } : {}) } })
   if (error) throw new Error(submissionError(error.message))
   if (typeof data !== 'string') throw new Error('La richiesta non è stata confermata. Riprova.')
   return data

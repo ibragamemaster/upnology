@@ -1,4 +1,7 @@
-import { test } from 'node:test'
+import { test, mock } from 'node:test'
+import Stripe from 'stripe'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createCheckout, handleStripeWebhook, type Attempt } from '../server/payments.ts'
 import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
@@ -216,6 +219,128 @@ test('PostgreSQL: migrations, commercial lifecycle, security and idempotency', a
   assert.deepEqual(await privileges(),grants)
   const column = await db.query<{column_default:string}>("select column_default from information_schema.columns where table_schema='upnology' and table_name='payment_attempts' and column_name='integration_version'")
   assert.equal(column.rows[0].column_default,'2')
+ })
+ const workspace = async () => (await db.query<{result: { admins: {user_id:string}[]; settings: {company_name:string}; history: {kind:string}[]; lead_history: {lead_id:string;note:string}[]; customers: {user_id:string;company:string;email:string}[]; commercial_counts: {live_received_cents:number;test_received_cents:number} }}>('select public.admin_workspace() result')).rows[0].result
+ const workspaceCmd = async (action: string, payload: Record<string, unknown>) => (await db.query<{result: Record<string,unknown>}>('select public.admin_workspace_command($1,$2::jsonb) result',[action,JSON.stringify(payload)])).rows[0].result
+ await t.test('admin workspace denies customers, keeps internal notes private and records profile changes', async () => {
+  await role(alice); await assert.rejects(workspace,/Admin access required/)
+  await assert.rejects(()=>workspaceCmd('note',{lead_id:leadId,note:'Forbidden note'}),/Admin access required/)
+  await assert.rejects(()=>db.query('select * from upnology.business_settings'),/permission denied/)
+  await role(admin)
+  await workspaceCmd('note',{lead_id:leadId,note:'Nota interna di prova'})
+  await workspaceCmd('customer',{user_id:alice,display_name:'Alice',last_name:'Test',phone:'',company:'Test SRL',sector:'Software',city:'Roma',email:'forged@example.com'})
+  const w=await workspace()
+  assert.ok(w.lead_history.some(e=>e.lead_id===leadId&&e.note==='Nota interna di prova'))
+  assert.equal(w.customers.find(c=>c.user_id===alice)?.company,'Test SRL')
+  assert.equal(w.customers.find(c=>c.user_id===alice)?.email,'alice@example.com')
+  assert.equal((await find(offerId)).contract!.snapshot.customer.name,snapshot.customer.name)
+  assert.ok(w.history.some(e=>e.kind==='customer_updated'))
+  await role(alice); assert.equal(JSON.stringify(await overview()).includes('Nota interna di prova'),false)
+ })
+ await t.test('company defaults are audited without rewriting documents; admin membership requires confirmation', async () => {
+  await role(admin)
+  const settings={company_name:'Upnology Test',address:'Via Test',tax_id:'TEST',timeline:'30 giorni',payment_terms:'Tre rate',responsibilities:'Termini di test',delivery_terms:'Dopo saldo',exclusions:'Hosting'}
+  await workspaceCmd('settings',settings)
+  assert.equal((await workspace()).settings.company_name,'Upnology Test')
+  assert.equal((await find(offerId)).snapshot.supplier.name,'Upnology')
+  await assert.rejects(()=>workspaceCmd('settings',{...settings,company_name:''}),/Company name required/)
+  await assert.rejects(()=>workspaceCmd('grant_admin',{email:'bob@example.com'}),/Confirmation required/)
+  await assert.rejects(()=>workspaceCmd('grant_admin',{email:'missing@example.com',confirmed:true}),/Verified account required/)
+  await workspaceCmd('grant_admin',{email:'bob@example.com',confirmed:true})
+  await role(bob); assert.ok((await workspace()).admins.some(a=>a.user_id===bob))
+  await role(admin);await workspaceCmd('revoke_admin',{email:'bob@example.com',confirmed:true})
+  await assert.rejects(()=>workspaceCmd('revoke_admin',{email:'admin@example.com',confirmed:true}),/Cannot revoke/)
+  await role(bob);await assert.rejects(workspace,/Admin access required/)
+ })
+ await t.test('refund authorization is server-calculated, idempotent and never marks payment refunded', async () => {
+  await role(alice);await assert.rejects(()=>workspaceCmd('refund_request',{attempt_id:attempts[0].id,confirmed:true}),/Admin access required/)
+  await role(admin)
+  await assert.rejects(()=>workspaceCmd('refund_request',{attempt_id:attempts[0].id}),/Confirmation required/)
+  const before=await find(offerId)
+  const first=await workspaceCmd('refund_request',{attempt_id:attempts[0].id,confirmed:true,amount_cents:1})
+  assert.equal(first.amount_cents,attempts[0].amount_cents)
+  assert.deepEqual(await workspaceCmd('refund_request',{attempt_id:attempts[0].id,confirmed:true}),first)
+  assert.equal((await find(offerId)).milestones[0].status,before.milestones[0].status)
+  const w=await workspace()
+  assert.equal(w.commercial_counts.live_received_cents,0)
+  assert.equal(w.commercial_counts.test_received_cents,attempts[0].amount_cents+attempts[1].amount_cents)
+  assert.equal((await find(offerId)).events.filter(e=>e.kind==='refund_requested').length,1)
+ })
+ await t.test('integrated fictitious customer: public request, admin, exact contract, SDK Checkout, signed webhooks and three-phase delivery', async () => {
+  const payload={submission_id:'55555555-5555-4555-8555-555555555555',name:'Alice Test',email:'alice@example.com',company:'Test SRL',sector:'Software',city:'Roma',activityDescription:'Attività fittizia per test isolato',goal:'Realizzare un sito web di prova',services:['website'],budget:'1000-2500',timeline:'one-month',preferredContact:'email',features:['Area riservata'],answers:{},notes:'Solo test'}
+  await role(alice)
+  const request=(await db.query<{id:string}>('select public.submit_quote_request($1::jsonb) id',[JSON.stringify(payload)])).rows[0].id
+  assert.equal((await db.query<{id:string}>('select public.submit_quote_request($1::jsonb) id',[JSON.stringify(payload)])).rows[0].id,request)
+  await assert.rejects(()=>db.query('select public.submit_quote_request($1::jsonb)',[JSON.stringify({...payload,goal:'Different request content'})]),/token already used/)
+  await role(admin)
+  const requests=(await db.query<{result:{quotes:{id:string;details:typeof payload}[]}}>('select public.admin_workspace() result')).rows[0].result.quotes
+  assert.equal(requests.find(q=>q.id===request)?.details.goal,payload.goal)
+  const id=await createOffer({request_id:request,snapshot:{...snapshot,items:[{description:'Progetto completo test',amount_cents:100000}],tax_bps:0}})
+  await cmd('send',{offer_id:id});await role(alice);await cmd('accept',{offer_id:id,confirmed:true})
+  let offer=await find(id)
+  assert.deepEqual(offer.snapshot.instalments,[30000,40000,30000]);assert.deepEqual(offer.contract!.snapshot,offer.snapshot)
+  await cmd('accept_contract',{offer_id:id,confirmed:true,snapshot_hash:offer.contract!.snapshot_hash})
+  const stripe=new Stripe('sk_test_isolated_fixture')
+  process.env.STRIPE_MODE='test';process.env.APP_URL='https://upnology.agency';process.env.STRIPE_WEBHOOK_SECRET='whsec_isolated_test';process.env.STRIPE_TAX_ENABLED='false';process.env.STRIPE_SANDBOX_INVOICES='false'
+  const sessions=new Map<string, Stripe.Checkout.Session>()
+  mock.method(stripe.checkout.sessions,'create',async(params:Stripe.Checkout.SessionCreateParams)=>{
+   const session={id:`cs_test_e2e_${sessions.size}`,mode:'payment',livemode:false,currency:'eur',amount_total:params.line_items![0].price_data!.unit_amount,metadata:params.metadata,status:'open',payment_status:'unpaid',payment_intent:null,url:'https://checkout.stripe.com/isolated-test'} as Stripe.Checkout.Session
+   sessions.set(session.id,session);return session
+  })
+  mock.method(stripe.checkout.sessions,'retrieve',async(id:string)=>{const session=sessions.get(id);assert.ok(session);return session})
+  const persist=async(action:string,data:Record<string,unknown>)=>{await role(null,'service_role');try{return await svc(action,data)}finally{await role(alice)}}
+  const reserve=async(_client:SupabaseClient,milestone:string)=>(await db.query<{result:Attempt}>('select public.commercial_checkout($1) result',[milestone])).rows[0].result
+  try {
+   for(const phase of [1,2,3]) {
+    if(phase>1){
+     await role(admin);await cmd('release',{offer_id:id,phase,url:`https://demo.example.com/e2e/${phase}`,notes:'Versione fittizia verificabile',protection_note:'Accesso di test isolato e autenticato'})
+     if(phase===3) await cmd('prepare_delivery',{offer_id:id,url:'https://demo.example.com/e2e/delivery'})
+     const release=(await find(id)).releases.find(r=>r.phase===phase)!
+     await role(alice)
+     if(phase===2){
+      await cmd('feedback',{offer_id:id,release_id:release.id,body:'Revisione di test'})
+      await role(admin);const feedback=(await find(id)).releases.find(r=>r.id===release.id)!.feedback[0]
+      await cmd('resolve_feedback',{offer_id:id,feedback_id:feedback.id,resolution:'Revisione completata'})
+      await role(alice)
+     }
+     await cmd('approve_release',{offer_id:id,release_id:release.id,confirmed:true})
+    }
+    offer=await find(id);const milestone=offer.milestones[phase-1]
+    const deps={stripe,reserve,persist}
+    const url=await createCheckout({} as SupabaseClient,milestone.id,deps)
+    assert.equal(url.url,'https://checkout.stripe.com/isolated-test')
+    await createCheckout({} as SupabaseClient,milestone.id,deps);assert.equal(sessions.size,phase)
+    assert.notEqual((await find(id)).milestones[phase-1].status,'PAGATO')
+    const session=[...sessions.values()][phase-1];assert.equal(session.amount_total,[30000,40000,30000][phase-1])
+    session.status='complete';session.payment_status='paid';session.payment_intent=`pi_e2e_${phase}`
+    const body=JSON.stringify({id:`evt_e2e_${phase}`,type:'checkout.session.completed',livemode:false,data:{object:{id:session.id}}})
+    const signature=stripe.webhooks.generateTestHeaderString({payload:body,secret:process.env.STRIPE_WEBHOOK_SECRET!})
+    for(let retry=0;retry<2;retry++) await handleStripeWebhook(new Request('https://upnology.agency/api/stripe/webhook',{method:'POST',headers:{'stripe-signature':signature},body}),{stripe,persist})
+    assert.equal((await find(id)).milestones[phase-1].status,'PAGATO')
+   }
+   offer=await find(id);assert.equal(offer.project!.commercial_stage,'CONSEGNATO')
+   await role(admin);offer=await find(id)
+   assert.equal(offer.payments.length,3);assert.equal(offer.events.filter(e=>e.kind==='stripe_paid').length,3)
+   assert.equal(offer.emails.filter(e=>e.kind==='delivery').length,1)
+   assert.ok(offer.emails.every(e=>e.status==='queued'))
+  } finally { mock.restoreAll() }
+ })
+ await t.test('lost command response retries return the same draft; changed payload and core bypass are rejected', async () => {
+  await role(admin)
+  const payload={_command_id:'66666666-6666-4666-8666-666666666666',customer_user_id:alice,template_id:template,expires_at:'2099-01-01',snapshot}
+  const first=await cmd('save',payload)
+  assert.deepEqual(await cmd('save',payload),first)
+  await assert.rejects(()=>cmd('save',{...payload,snapshot:{...snapshot,title:'Different draft'}}),/identifier already used/)
+  await assert.rejects(()=>db.query('select public.commercial_command_core($1,$2::jsonb)',['save',JSON.stringify(payload)]),/permission denied/)
+  await role(bob);await assert.rejects(()=>cmd('save',payload),/Admin access required/)
+  await db.exec('reset role');await db.exec(await readFile('supabase/migrations/20261026020000_commercial_command_retry.sql','utf8'))
+  await role(admin);assert.deepEqual(await cmd('save',payload),first)
+ })
+ await t.test('workspace migration is repeatable without changing data or grants', async () => {
+  await role(admin);const before=await workspace()
+  await db.exec('reset role');await db.exec(await readFile('supabase/migrations/20261026000000_admin_workspace.sql','utf8'))
+  await role(admin);assert.deepEqual(await workspace(),before)
+  await role(null,'anon');await assert.rejects(workspace,/permission denied/)
  })
  await db.close()
 })

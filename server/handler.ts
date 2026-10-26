@@ -4,7 +4,8 @@ import { z } from 'zod'
 import { features, HttpError, protectedLink } from './config.ts'
 import { rpc, service, userClient } from './database.ts'
 import { createCheckout, handleStripeWebhook, reconcileCheckout } from './payments.ts'
-import { deliverEmails } from './emails.ts'
+import { deliverEmails, emailCopy } from './emails.ts'
+import { paymentReceipt, requestRefund } from './paymentOperations.ts'
 import { renderDocument } from './documents.ts'
 import type { CommercialOverview } from '../src/domain/commercial.ts'
 const uuid = z.string().uuid()
@@ -71,6 +72,19 @@ async function route(request: Request): Promise<Response> {
   const result = await reconcileCheckout(attempt_id, session_id)
   if (f.email) waitUntil(deliverEmails().catch(() => { console.warn('Commercial email worker deferred; jobs remain in outbox') }))
   return Response.json(result)
+ }
+ if (path === '/api/commercial/email-templates' && request.method === 'GET') {
+  if (!(await rpc<boolean>(client, 'admin_access'))) throw new HttpError(403, 'Accesso admin richiesto.')
+  return Response.json(emailCopy)
+ }
+ if (path === '/api/commercial/refund' && request.method === 'POST') {
+  if (!(await rpc<boolean>(client, 'admin_access'))) throw new HttpError(403, 'Accesso admin richiesto.')
+  const { attempt_id } = z.object({ attempt_id: uuid, confirmed: z.literal(true) }).parse(await jsonBody(request))
+  return Response.json(await requestRefund(client, attempt_id))
+ }
+ if (path === '/api/commercial/receipt' && request.method === 'POST') {
+  const { attempt_id } = z.object({ attempt_id: uuid }).parse(await jsonBody(request))
+  return Response.json(await paymentReceipt(client, attempt_id))
  }
  if (path === '/api/commercial/emails' && request.method === 'POST') {
   if (!(await rpc<boolean>(client, 'admin_access'))) throw new HttpError(403, 'Accesso admin richiesto.')

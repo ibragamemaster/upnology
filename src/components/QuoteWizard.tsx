@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { budgetLabels, budgets, contactMethods, featureOptions, goalQuestions, quoteSchema, serviceIds, serviceLabels, timelineLabels, timelines, type QuoteRequest, type ServiceChoice } from '../domain/lead'
 import { submitQuoteRequest } from '../lib/leads'
 
@@ -23,6 +23,8 @@ function OptionButton({ selected, children, onClick }: { selected: boolean; chil
 }
 
 export function QuoteWizard() {
+  const submission = useRef<{ payload: string; id: string } | null>(null)
+  const inFlight = useRef(false)
   const [draft, setDraft] = useState<Draft>(startingDraft)
   const [step, setStep] = useState(0)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -66,15 +68,18 @@ export function QuoteWizard() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const submit = async () => {
+    if (inFlight.current) return
     const parsed = quoteSchema.safeParse(draft)
     if (!parsed.success) { setSubmitError('Alcuni dati non sono validi. Torna ai passaggi precedenti e controllali.'); return }
-    setSending(true); setSubmitError('')
+    const payload = JSON.stringify(parsed.data)
+    if (submission.current?.payload !== payload) submission.current = { payload, id: crypto.randomUUID() }
+    inFlight.current = true; setSending(true); setSubmitError('')
     try {
-      const reference = await submitQuoteRequest(parsed.data)
+      const reference = await submitQuoteRequest(parsed.data, submission.current.id)
       setSuccess(reference)
       sessionStorage.removeItem(storageKey)
       window.scrollTo({ top: 0, behavior: 'smooth' })
-    } catch (error) { setSubmitError(error instanceof Error ? error.message : 'Invio non riuscito. Riprova.') } finally { setSending(false) }
+    } catch (error) { setSubmitError(error instanceof Error ? error.message : 'Invio non riuscito. Riprova.') } finally { inFlight.current = false; setSending(false) }
   }
 
   if (success) return <div className="wizard-success" role="status"><span className="eyebrow">Richiesta inviata</span><h1>Richiesta <em>ricevuta.</em></h1><p>Abbiamo ricevuto i dettagli del tuo progetto. Ti ricontatteremo per approfondire esigenze, tempistiche e soluzione.</p><p className="reference">Riferimento: {success}</p><a className="button-primary" href="/">Torna alla Home <span aria-hidden="true">↗</span></a></div>

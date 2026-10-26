@@ -16,7 +16,7 @@ export type Offer = {
  expires_at: string; created_at: string; accepted_at: string | null; project_id: string | null;
  contract: Contract | null; project: { id: string; status: string; commercial_stage: string; delivered_at: string | null } | null;
  milestones: Milestone[]; releases: Release[];
- payments: { id: string; milestone_id: string; session_id: string | null; payment_intent: string | null; status: string; amount_cents: number; created_at: string }[];
+ payments: { stripe_livemode?: boolean | null; invoice_id?: string | null; id: string; milestone_id: string; session_id: string | null; payment_intent: string | null; status: string; amount_cents: number; created_at: string }[];
  events: { id: number; kind: string; detail: Record<string, unknown>; created_at: string }[];
  emails: { id: string; kind: string; status: string; attempts: number; recipient: string; last_error: string | null; sent_at: string | null }[];
 }

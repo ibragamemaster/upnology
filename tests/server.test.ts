@@ -134,3 +134,22 @@ test('Resend worker persists receipts and retries with identical payload and ide
   process.env.RESEND_ENABLED='false';await assert.rejects(deliverEmails,/non ancora configurato/)
  } finally {mocked.mock.restore();process.env.RESEND_ENABLED='false'}
 })
+
+test('management endpoints reject anonymous and non-admin requests before privileged Stripe or email operations', async () => {
+ env(true)
+ for(const path of ['refund','receipt','email-templates']) {
+  assert.equal((await handleRequest(new Request(`https://example.com/api/commercial/${path}`,{method:path==='email-templates'?'GET':'POST'}))).status,401)
+ }
+ const fetchMock=mock.method(globalThis,'fetch',async(url:string|URL|Request)=>{
+  const target=String(url)
+  if(target.includes('/auth/v1/user'))return Response.json({id:'33333333-3333-4333-8333-333333333333',email:'bob@example.com',email_confirmed_at:'2026-10-01T00:00:00Z'})
+  if(target.includes('/rpc/admin_access'))return Response.json(false)
+  throw new Error('Unexpected privileged request')
+ })
+ try {
+  for(const path of ['refund','email-templates']){
+   const response=await handleRequest(new Request(`https://example.com/api/commercial/${path}`,{method:path==='refund'?'POST':'GET',headers:{Authorization:'Bearer test-customer','Content-Type':'application/json'},...(path==='refund'?{body:JSON.stringify({attempt_id:'44444444-4444-4444-8444-444444444444',confirmed:true})}:{})}))
+   assert.equal(response.status,403)
+  }
+ }finally{fetchMock.mock.restore()}
+})

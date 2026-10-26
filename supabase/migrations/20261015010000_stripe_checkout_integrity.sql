@@ -1,8 +1,8 @@
 -- Preserve legacy attempts; all newly reserved sessions use strict project metadata.
-alter table upnology.payment_attempts add column integration_version integer not null default 1;
+alter table upnology.payment_attempts add column if not exists integration_version integer not null default 1;
 alter table upnology.payment_attempts alter column integration_version set default 2;
-alter table upnology.payment_attempts add column stripe_livemode boolean;
-alter table upnology.payment_attempts add column invoice_id text;
+alter table upnology.payment_attempts add column if not exists stripe_livemode boolean;
+alter table upnology.payment_attempts add column if not exists invoice_id text;
 
 create or replace function public.commercial_checkout(p_milestone uuid) returns jsonb language plpgsql security definer set search_path='' as $$
 declare m upnology.milestones; o upnology.offers; a upnology.payment_attempts;

@@ -8,6 +8,7 @@ dist
 
 # Local tooling, deployment metadata and review artifacts
 .vercel/
+.vercel-backend/
 .agents/
 .codex/
 .aws/

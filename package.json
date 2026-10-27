@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run build:api && npm run typecheck && vite build",
+    "build:api": "tsc -p tsconfig.function.json",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json",
     "lint": "eslint .",
     "test": "node --import tsx --test --experimental-test-isolation=none tests/*.test.ts",

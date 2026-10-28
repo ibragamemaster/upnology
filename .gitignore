@@ -5,6 +5,7 @@ dist
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Local tooling, deployment metadata and review artifacts
 .vercel/

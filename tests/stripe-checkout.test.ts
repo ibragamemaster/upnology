@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createCheckout, fiscalOptions, type Attempt } from '../server/payments.ts'
+import { features } from '../server/config.ts'
 
 test('Checkout SDK request uses persisted 300 EUR, linkage, stable idempotency and safe fiscal defaults', async () => {
  process.env.APP_URL='https://upnology.agency';process.env.STRIPE_MODE='test'
@@ -58,12 +59,23 @@ test('restricted keys support both modes, reject mismatches, and remain disabled
    for(const kind of ['rk','sk']) {
     process.env.STRIPE_SECRET_KEY=`${kind}_${mode}_fixture`
     assert.ok(stripeClient() instanceof Stripe) // Client construction only; no network requests.
+    assert.equal(features().payments,true)
    }
    process.env.STRIPE_SECRET_KEY=`rk_${mode==='live'?'test':'live'}_fixture`
    assert.throws(stripeClient,/incoerente/)
+   assert.equal(features().payments,false)
   }
   process.env.STRIPE_MODE='live';process.env.STRIPE_SECRET_KEY='rk_live_fixture';process.env.STRIPE_ENABLED='false'
   assert.throws(stripeClient,/non ancora attivati/)
+  assert.equal(features().payments,false)
+  process.env.STRIPE_ENABLED='true'
+  for (const origin of ['http://localhost:5173','https://example.com/path','invalid']) {
+   process.env.APP_URL=origin
+   assert.equal(features().payments,false)
+   assert.throws(stripeClient,/non ancora attivati/)
+  }
+  process.env.APP_URL='https://upnology.agency';process.env.STRIPE_WEBHOOK_SECRET='   '
+  assert.equal(features().payments,false)
  } finally {
   for(const key of Object.keys(process.env)) if(!(key in previous)) delete process.env[key]
   Object.assign(process.env,previous)

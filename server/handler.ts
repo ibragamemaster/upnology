@@ -1,7 +1,7 @@
 import { waitUntil } from '@vercel/functions'
 import { timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
-import { features, HttpError, protectedLink } from './config.ts'
+import { features, HttpError, protectedLink, stripeConfigurationChecks } from './config.ts'
 import { rpc, service, userClient } from './database.ts'
 import { createCheckout, handleStripeWebhook, reconcileCheckout } from './payments.ts'
 import { deliverEmails, emailCopy } from './emails.ts'
@@ -40,6 +40,10 @@ async function route(request: Request): Promise<Response> {
   return Response.json({ expired, email: f.email ? await deliverEmails() : { disabled: true } })
  }
  const client = await userClient(request)
+ if (path === '/api/commercial/stripe-diagnostics' && request.method === 'GET') {
+  if (await rpc<boolean>(client, 'admin_access') !== true) throw new HttpError(403, 'Accesso admin richiesto.')
+  return Response.json({ payments: f.payments, checks: stripeConfigurationChecks() })
+ }
  if (path === '/api/commercial/overview' && request.method === 'GET') return Response.json(await rpc(client, 'commercial_overview'))
  if (path === '/api/commercial/command' && request.method === 'POST') {
   const { action, data } = command.parse(await jsonBody(request))

@@ -6,3 +6,38 @@
 @media(max-width:1000px){.admin-workspace{grid-template-columns:1fr}.admin-workspace .admin-tabs{position:static;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.admin-tabs button{padding:12px 8px;min-height:44px}.admin-business-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:450px){.admin-workspace .admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-section-heading{flex-wrap:wrap}.admin-record{padding:15px}.admin-record-actions{justify-content:start}.admin-metrics strong{overflow-wrap:anywhere}}
 .admin-shell .commercial-card,.admin-shell .commercial-form{background:#10222d;border-color:#ffffff29}.admin-shell .commercial-panel button{background:#173a42;color:#c6f6ef}.admin-shell .commercial-release,.admin-shell .commercial-feedback{border-color:#7ce3cb}.admin-shell .commercial-panel :is(button,summary):focus-visible{outline-color:#8ce9f1}.admin-shell .commercial-panel :is(input,select,textarea){background:#08151e}
+/* Business Control Center — scoped to the existing admin. */
+.admin-shell{padding-inline:clamp(16px,3vw,48px)}
+.admin-shell .admin-heading{margin-bottom:24px;align-items:center}
+.admin-shell .admin-heading h1{font-size:clamp(28px,3.5vw,44px);line-height:1.15;letter-spacing:-.035em}
+.admin-shell .admin-workspace{grid-template-columns:200px minmax(0,1fr);gap:24px;margin-top:20px}
+.admin-shell .admin-tabs{border-radius:14px;padding:8px}
+.admin-shell .admin-tabs button{border:0;border-radius:8px;padding:14px 12px;font-size:14px}
+.admin-shell .admin-section,.admin-shell .admin-record,.admin-shell .admin-customer,.admin-shell .admin-metrics>div{border-radius:12px}
+.admin-shell .admin-section{padding:24px}
+.admin-shell .admin-section h2,.admin-shell .commercial-heading h2,.admin-shell .admin-section-heading h2{font-size:21px;margin:0 0 12px}
+.admin-shell .admin-metrics{gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.admin-shell .admin-metrics>div{padding:18px;gap:8px}
+.admin-shell .admin-metrics strong{font-size:27px}
+.admin-shell .admin-overview{gap:20px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.admin-shell .admin-subnav{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.admin-shell .admin-subnav button{border:1px solid #ffffff29;color:#b9cbd2;background:#101e28;padding:12px 16px;border-radius:8px;cursor:pointer;min-height:44px}
+.admin-shell .admin-subnav button[aria-current]{color:#09202a;background:#8ce9f1}
+.admin-data-note{font-size:12px;color:#9eb6c1;line-height:1.6}
+.admin-next-actions{display:grid;gap:8px;margin:16px 0 24px}
+.admin-next-actions button,.admin-queue-row{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#10222d;border:1px solid #ffffff29;color:#eaf4f5;padding:14px;border-radius:8px;text-align:left;cursor:pointer;width:100%;min-height:44px}
+.admin-queue-row{margin-top:8px}.admin-queue-row small{display:block;color:#a3bac4;margin-top:6px}
+.admin-timeline{display:grid;grid-template-columns:85px minmax(0,1fr);gap:12px;border-bottom:1px solid #ffffff1a;padding:14px 0;font-size:13px}
+.admin-timeline p{margin:0;overflow-wrap:anywhere;line-height:1.6}.admin-timeline time{color:#9eb6c1}
+.admin-offer-summary{border:1px solid #ffffff29;background:#101e28;padding:22px;border-radius:12px;margin:14px 0;overflow-wrap:anywhere}
+.admin-offer-summary h3{font-size:20px;margin:12px 0 8px}.admin-offer-summary p{color:#b9cbd2;line-height:1.6}
+.admin-shell summary{cursor:pointer;line-height:1.5;padding-block:10px;overflow-wrap:anywhere}
+.admin-badge{display:inline-block;font-size:12px;color:#a9f7d2;background:#183842;padding:5px 9px;border-radius:6px;width:fit-content}
+.admin-phases{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
+.admin-phases>div{display:flex;flex-direction:column;gap:10px;border:1px solid #ffffff29;padding:16px;border-radius:8px;background:#0a1821}
+.admin-phases strong{font-size:23px}.admin-phases small{color:#a3bac4}
+.admin-customer-commercial{margin-top:24px}.admin-customer-commercial .admin-record{margin-bottom:12px}
+.admin-shell .commercial-table-wrap{max-width:100%;overflow:auto}.admin-shell table{width:100%;border-collapse:collapse;text-align:left}.admin-shell :is(th,td){padding:12px;border-bottom:1px solid #ffffff29}
+.admin-shell .commercial-card{min-width:0}.admin-shell .commercial-actions{flex-wrap:wrap}.admin-shell button{min-height:40px}
+@media(max-width:1000px){.admin-shell .admin-workspace{grid-template-columns:1fr}.admin-shell .admin-overview{grid-template-columns:1fr}.admin-shell .admin-tabs{position:static}}
+@media(max-width:650px){.admin-shell .admin-section,.admin-offer-summary{padding:16px}.admin-phases{grid-template-columns:1fr}.admin-phases>div{gap:8px}.admin-shell .admin-section-heading{align-items:start;flex-wrap:wrap}.admin-shell .admin-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-shell .admin-metrics strong{font-size:22px}.admin-shell .commercial-grid{grid-template-columns:1fr}.admin-shell .commercial-line{display:flex;flex-direction:column;align-items:stretch}.admin-shell .admin-record-main{gap:14px}}

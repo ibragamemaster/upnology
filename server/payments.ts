@@ -5,10 +5,10 @@ import { rpc, service } from './database.ts'
 
 export type Attempt = { project_id: string; customer_user_id: string; integration_version: number; id: string; milestone_id: string; offer_id: string; phase: number; amount_cents: number; expires_at: string; session_id: string | null; status: string; title: string; email: string }
 export function stripeClient() {
- if (!features().payments) throw new HttpError(503, 'Pagamenti non ancora attivati. Nessun addebito è stato effettuato.')
- const key = process.env.STRIPE_SECRET_KEY!
+ const key = process.env.STRIPE_SECRET_KEY ?? ''
  const live = process.env.STRIPE_MODE === 'live'
- if (!(live ? /^(?:sk|rk)_live_/ : /^(?:sk|rk)_test_/).test(key)) throw new HttpError(503, 'Configurazione Stripe incoerente.')
+ if (process.env.STRIPE_ENABLED === 'true' && !(live ? /^(?:sk|rk)_live_/ : /^(?:sk|rk)_test_/).test(key)) throw new HttpError(503, 'Configurazione Stripe incoerente.')
+ if (!features().payments) throw new HttpError(503, 'Pagamenti non ancora attivati. Nessun addebito è stato effettuato.')
  return new Stripe(key, { maxNetworkRetries: 2, timeout: 15000 })
 }
 type PaymentDependencies = {

@@ -13,7 +13,7 @@ export async function commercialFetch<T>(path: string, data?: unknown): Promise<
  if (!response.ok) throw new Error(result.error ?? 'Operazione non riuscita.')
  return result as T
 }
-export const loadCommercial = () => commercialFetch<CommercialOverview>('overview')
+export const loadCommercial = (scope: 'admin' | 'customer' = 'admin') => commercialFetch<CommercialOverview>(scope === 'customer' ? 'overview?scope=customer' : 'overview')
 let pendingCommand: { fingerprint: string; id: string } | undefined
 export async function commercialCommand(action: string, data: Record<string, unknown>) {
  const fingerprint = JSON.stringify({ action, data })

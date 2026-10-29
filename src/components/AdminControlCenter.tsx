@@ -6,7 +6,7 @@ const date = (s: string | null) => s ? new Date(s).toLocaleDateString('it-IT') :
 export function PaymentPhases({ offer }: { offer: Offer }) {
  return <div className="admin-phases">{[1, 2, 3].map(phase => {
   const m = offer.milestones.find(x => x.phase === phase)
-  return <div key={phase}><span>{phase}. {['Avvio', 'Demo', 'Saldo'][phase - 1]}</span>{m ? <><strong>{euro(m.amount_cents)}</strong><span className="admin-badge">{readable(m.status)}</span><small>Scadenza: {date(m.due_at)}</small>{m.paid_at && <small>Registrato: {date(m.paid_at)}</small>}{m.refunded_cents > 0 && <small>Rimborsato: {euro(m.refunded_cents)}</small>}</> : <p>Rata non disponibile</p>}</div>
+  return <div key={phase}><span>{phase}. {['Avvio', 'Demo', 'Consegna (saldo)'][phase - 1]}</span>{m ? <><strong>{euro(m.amount_cents)}</strong><span className="admin-badge">{readable(m.status)}</span><small>Scadenza: {date(m.due_at)}</small>{m.paid_at && <small>Registrato: {date(m.paid_at)}</small>}{m.refunded_cents > 0 && <small>Rimborsato: {euro(m.refunded_cents)}</small>}</> : <p>Rata non disponibile</p>}</div>
  })}</div>
 }
 export function FinanceSummary({ data, commercial }: { data: AdminWorkspace; commercial: CommercialOverview }) {

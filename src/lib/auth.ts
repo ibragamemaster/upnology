@@ -1,3 +1,4 @@
+import { accountDestination } from './authNavigation'
 import { getSupabaseClient } from './supabase'
 import { passwordResetRedirect, completePasswordRecovery } from './passwordRecovery'
 
@@ -11,9 +12,9 @@ export function authError(message: string) {
   return 'Operazione non riuscita. Riprova tra poco.'
 }
 
-export async function signUp(email: string, password: string, firstName: string) {
+export async function signUp(email: string, password: string, firstName: string, destination = '/account') {
   const { data, error } = await getSupabaseClient().auth.signUp({
-    email, password, options: { data: { first_name: firstName }, emailRedirectTo: `${window.location.origin}/account` },
+    email, password, options: { data: { first_name: firstName }, emailRedirectTo: `${window.location.origin}${accountDestination(destination)}` },
   })
   if (error) throw new Error(authError(error.message))
   return data

@@ -25,7 +25,8 @@ async function jsonBody(request: Request) {
 }
 async function route(request: Request): Promise<Response> {
  const requestUrl = new URL(request.url)
- const path = requestUrl.pathname === '/api' && requestUrl.searchParams.has('route') ? `/api/${requestUrl.searchParams.get('route')}` : requestUrl.pathname
+ const pathname = requestUrl.pathname.replace(/\/+$/, '') || '/'
+ const path = pathname === '/api' && requestUrl.searchParams.has('route') ? `/api/${requestUrl.searchParams.get('route')!.replace(/^\/+|\/+$/g, '')}` : pathname
  const f = features()
  if (path === '/api/commercial/status' && request.method === 'GET') return Response.json(f)
  if (!f.backend) throw new HttpError(503, 'Sistema commerciale non ancora attivato.')
@@ -44,7 +45,15 @@ async function route(request: Request): Promise<Response> {
   if (await rpc<boolean>(client, 'admin_access') !== true) throw new HttpError(403, 'Accesso admin richiesto.')
   return Response.json({ payments: f.payments, checks: stripeConfigurationChecks() })
  }
- if (path === '/api/commercial/overview' && request.method === 'GET') return Response.json(await rpc(client, 'commercial_overview'))
+ if (path === '/api/commercial/overview' && request.method === 'GET') {
+  const overview = await rpc<CommercialOverview>(client, 'commercial_overview')
+  if (requestUrl.searchParams.get('scope') === 'customer') {
+   const { data, error } = await client.auth.getUser(request.headers.get('authorization')!.slice(7))
+   if (error || !data.user) throw new HttpError(401, 'Sessione non valida.')
+   return Response.json({ offers: overview.offers.filter(offer => offer.customer_user_id === data.user.id), templates: [] })
+  }
+  return Response.json(overview)
+ }
  if (path === '/api/commercial/command' && request.method === 'POST') {
   const { action, data } = command.parse(await jsonBody(request))
   if (['release', 'prepare_delivery', 'delivery'].includes(action)) data.url = protectedLink(z.string().parse(data.url))

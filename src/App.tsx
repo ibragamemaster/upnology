@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { activeServices } from './content/services'
 import { SiteFooter, SiteHeader } from './components/SiteHeader'
 import { AboutPage, ContactsPage, MarketingPage, ProjectsPage, QuotePage, ServicesPage } from './pages/Pages'
@@ -114,7 +114,7 @@ function HomePage() {
 }
 
 function App() {
-  const route = window.location.pathname.replace(/\/$/, '') || '/'
+  const route = window.location.pathname.replace(/\/+$/, '') || '/'
   if (route === '/demo/ristorante') return <Suspense fallback={<main role="status">Caricamento demo…</main>}><DemoPages type="restaurant" path={route} /></Suspense>
   if (route === '/demo/streetwear' || route === '/demo/streetwear/carrello' || route === '/demo/streetwear/riepilogo' || route.startsWith('/demo/streetwear/prodotto/')) return <Suspense fallback={<main role="status">Caricamento demo…</main>}><DemoPages type="streetwear" path={route} /></Suspense>
   if (route === '/demo/automotive' || route === '/demo/automotive/confronta' || route.startsWith('/demo/automotive/auto/')) return <Suspense fallback={<main role="status">Caricamento demo…</main>}><AutomotiveDemo path={route} /></Suspense>

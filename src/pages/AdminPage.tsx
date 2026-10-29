@@ -58,8 +58,7 @@ export function AdminPage() {
 
   useEffect(() => {
     setData(null); setCommercial(null); setCommercialError(''); setAccess('checking'); setError('')
-    if (authError) return <main className="admin-shell"><p role="alert">{authError}</p><button onClick={() => window.location.reload()}>Riprova</button></main>
-  if (authLoading || !user) return
+    if (authError || authLoading || !user) return
     let active = true
     hasAdminAccess().then(allowed => {
       if (!active) return
@@ -68,7 +67,7 @@ export function AdminPage() {
       if (allowed) loadAdmin().then(value => { if (active) setData(value) }).catch(() => { if (active) setError('Non riusciamo a caricare i dati admin.') })
     }).catch(() => { if (active) setAccess('error') })
     return () => { active = false }
-  }, [authLoading, user])
+  }, [authError, authLoading, user])
 
   useEffect(() => {
     if (access !== 'allowed' || !user || !['overview', 'customers'].includes(tab) || busy) return

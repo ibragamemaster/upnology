@@ -1,3 +1,4 @@
+import { quoteDraft, quoteAmounts, requestBrief, requestDescription } from '../domain/quoteDraft'
 import { milestoneAction, releaseApprovalBlock } from '../domain/commercialFlow'
 import { StripeDiagnostics } from './StripeDiagnostics'
 import { PaymentPhases } from './AdminControlCenter'
@@ -8,21 +9,26 @@ import { commercialCommand, commercialFetch, downloadCommercialDocument, loadCom
 import { euro, type CommercialOverview, type ContractTemplate, type Offer, type OfferSnapshot } from '../domain/commercial'
 import '../commercial.css'
 const date = (value: string | null) => value ? new Date(value).toLocaleString('it-IT') : '—'
-const emptySnapshot: OfferSnapshot = {
- title: '', description: '', customer: { name: '', address: '', tax_id: '' }, supplier: { name: 'Upnology', address: '', tax_id: '' },
- items: [{ description: '', amount_cents: 0 }], subtotal_cents: 0, tax_bps: 0, tax_cents: 0,
- tax_label: '', total_cents: 0, currency: 'EUR', timeline: '', payment_terms: '', revisions: 2,
- responsibilities: '', delivery_terms: '', exclusions: '', percentages: [30, 40, 30], payment_due_days: [7, 7, 7], instalments: [],
-}
 type Run = (operation: () => Promise<unknown>, success?: string) => Promise<void>
 
-function QuoteEditor({ offer, templates, customers, requests, busy, run, done, defaults, initialRequest }: { initialRequest?: AdminQuote; defaults?: Partial<BusinessSettings>; offer?: Offer; templates: ContractTemplate[]; customers: AdminCustomer[]; requests: AdminQuote[]; busy: boolean; run: Run; done: () => void }) {
- const [s, setSnapshot] = useState<OfferSnapshot>(offer?.snapshot ?? { ...emptySnapshot, customer: { ...emptySnapshot.customer, name: initialRequest?.name ?? '', email: initialRequest?.email }, supplier: { name: defaults?.company_name || 'Upnology', address: defaults?.address || '', tax_id: defaults?.tax_id || '' }, timeline: defaults?.timeline || '', payment_terms: defaults?.payment_terms || '', responsibilities: defaults?.responsibilities || '', delivery_terms: defaults?.delivery_terms || '', exclusions: defaults?.exclusions || '' })
+function QuoteEditor({ offer, templates, customers, requests, busy, run, done, defaults, initialRequest, offers }: { offers: Offer[]; initialRequest?: AdminQuote; defaults?: Partial<BusinessSettings>; offer?: Offer; templates: ContractTemplate[]; customers: AdminCustomer[]; requests: AdminQuote[]; busy: boolean; run: Run; done: () => void }) {
+ const [s, setSnapshot] = useState<OfferSnapshot>(() => offer?.snapshot ?? quoteDraft(initialRequest, customers.find(c => c.user_id === initialRequest?.customer_user_id), defaults, offers))
  const [customer, setCustomer] = useState(offer?.customer_user_id ?? initialRequest?.customer_user_id ?? '')
  const [request, setRequest] = useState(offer?.request_id ?? initialRequest?.id ?? '')
- const [template, setTemplate] = useState(offer?.template_id ?? '')
+ const [template, setTemplate] = useState(offer?.template_id ?? (templates.filter(t => t.approved_at).length === 1 ? templates.find(t => t.approved_at)!.id : ''))
  const [expiry, setExpiry] = useState((offer ? new Date(offer.expires_at) : new Date(Date.now() + 30 * 86400000)).toISOString().slice(0, 10))
  const set = <K extends keyof OfferSnapshot>(key: K, value: OfferSnapshot[K]) => setSnapshot(current => ({ ...current, [key]: value }))
+ const source = requests.find(q => q.id === request) ?? (initialRequest?.id === request ? initialRequest : undefined)
+ const amounts = quoteAmounts(s)
+ const selectRequest = (id: string) => {
+  if (id === request) return
+  const selected = requests.find(q => q.id === id)
+  if (!selected) { setRequest(id); return }
+  if ((s.description || s.items.some(item => item.amount_cents > 0)) && !window.confirm('Caricare i dati della richiesta selezionata? Titolo, descrizione, servizi e prezzi della bozza verranno sostituiti; le condizioni già inserite restano.')) return
+  const next = quoteDraft(selected, customers.find(c => c.user_id === customer), defaults, offers)
+  setRequest(id)
+  setSnapshot(current => ({ ...current, title: next.title, description: next.description, items: next.items, customer: next.customer, timeline: next.timeline }))
+ }
  const submit = (event: FormEvent) => {
   event.preventDefault()
   void run(async () => {
@@ -31,40 +37,51 @@ function QuoteEditor({ offer, templates, customers, requests, busy, run, done, d
  }
  return <form className="commercial-form" onSubmit={submit}>
   <div className="commercial-heading"><h3>{offer ? 'Modifica bozza' : 'Nuovo preventivo'}</h3><button type="button" onClick={done}>Chiudi</button></div>
-  {customers.length === 0 && <p role="status">Prima di creare un’offerta serve un cliente con account verificato.</p>}
+  {customers.length === 0 && !customer && <p role="status">Prima di creare un’offerta serve un cliente con account verificato.</p>}
   {!templates.some(t => t.approved_at) && <p role="status">Nessun modello contrattuale approvato: puoi preparare una bozza, ma l’invio richiede l’approvazione del modello in Impostazioni.</p>}
   <div className="commercial-grid">
    <label>Cliente verificato<select required value={customer} onChange={e => {
-    setCustomer(e.target.value); setRequest(''); const c = customers.find(x => x.user_id === e.target.value)
-    if (c) set('customer', { ...s.customer, name: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company || c.email, email: c.email })
+    const c = customers.find(x => x.user_id === e.target.value)
+    setCustomer(e.target.value); setRequest(''); set('customer', quoteDraft(undefined, c, defaults, offers).customer)
    }}><option value="">Seleziona cliente</option>{customer && !customers.some(c => c.user_id === customer) && <option value={customer}>{offer?.snapshot.customer.name || initialRequest?.name || 'Cliente già collegato'} · {offer?.snapshot.customer.email || initialRequest?.email}</option>}{customers.map(c => <option key={c.user_id} value={c.user_id}>{c.company || [c.first_name, c.last_name].join(' ')} · {c.email}</option>)}</select></label>
-   <label>Richiesta di origine<select value={request} onChange={e => setRequest(e.target.value)}><option value="">Nessuna richiesta associata</option>{request && !requests.some(q => q.id === request && q.customer_user_id === customer) && <option value={request}>Richiesta già collegata · {request}</option>}{requests.filter(q => q.customer_user_id === customer).map(q => <option key={q.id} value={q.id}>{date(q.created_at)} · {q.services.join(', ')}</option>)}</select></label>
+   <label>Richiesta di origine<select value={request} onChange={e => selectRequest(e.target.value)}><option value="">Nessuna richiesta associata</option>{request && !requests.some(q => q.id === request && q.customer_user_id === customer) && <option value={request}>Richiesta già collegata · {request}</option>}{requests.filter(q => q.customer_user_id === customer).map(q => <option key={q.id} value={q.id}>{date(q.created_at)} · {q.services.join(', ')}</option>)}</select></label>
    <label>Titolo progetto<input required maxLength={160} value={s.title} onChange={e => set('title', e.target.value)}/></label>
    <label>Scadenza preventivo<input type="date" required value={expiry} onChange={e => setExpiry(e.target.value)}/></label>
    <label>Modello contrattuale<select required value={template} onChange={e => setTemplate(e.target.value)}><option value="">Seleziona modello</option>{templates.map(t => <option key={t.id} value={t.id}>{t.title} · {t.approved_at ? 'Approvato' : 'Da approvare'}</option>)}</select></label>
   </div>
+  {source && <details className="commercial-card" open><summary>Dati già raccolti · richiesta {source.id}</summary><p>Il budget è indicativo: i prezzi dell’offerta devono essere confermati dall’admin. I dati fiscali non raccolti restano da completare; quelli recuperati da offerte precedenti vanno verificati.</p>{requestBrief(source).map((row,i) => <p className="commercial-pre" key={`${row.label}-${i}`}><strong>{row.label}:</strong> {row.value}</p>)}{requestDescription(source).length > 5000 && <p role="status">La descrizione precompilata è limitata a 5.000 caratteri. Il brief completo è conservato nella richiesta e mostrato qui sopra; verifica il testo destinato al cliente.</p>}</details>}
   {(['customer', 'supplier'] as const).map(party => <fieldset key={party}><legend>{party === 'customer' ? 'Dati di fatturazione cliente' : 'Dati del fornitore'}</legend><div className="commercial-grid">{([['name', 'Nome / ragione sociale'], ['address', 'Indirizzo completo'], ['tax_id', 'Codice fiscale / P. IVA']] as const).map(([key, label]) => <label key={key}>{label}<input required value={s[party][key]} maxLength={500} onChange={e => set(party, { ...s[party], [key]: e.target.value })}/></label>)}</div></fieldset>)}
-  <fieldset><legend>Servizi e prezzi</legend>{s.items.map((item, i) => <div className="commercial-line" key={i}><label>Servizio / descrizione<input required minLength={2} maxLength={1000} value={item.description} onChange={e => set('items', s.items.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}/></label><label>Prezzo EUR<input type="number" min="0.01" step="0.01" required value={item.amount_cents / 100} onChange={e => set('items', s.items.map((x, j) => j === i ? { ...x, amount_cents: Math.round(Number(e.target.value) * 100) } : x))}/></label><button type="button" disabled={s.items.length === 1} onClick={() => set('items', s.items.filter((_, j) => j !== i))}>Rimuovi</button></div>)}<button type="button" disabled={s.items.length >= 40} onClick={() => set('items', [...s.items, { description: '', amount_cents: 0 }])}>Aggiungi servizio</button></fieldset>
+  <fieldset><legend>Servizi e prezzi</legend>{s.items.map((item, i) => <div className="commercial-line" key={i}><label>Servizio / descrizione<input required minLength={2} maxLength={1000} value={item.description} onChange={e => set('items', s.items.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}/></label><label>Prezzo EUR<input type="number" min="0.01" step="0.01" required value={item.amount_cents ? item.amount_cents / 100 : ''} onChange={e => set('items', s.items.map((x, j) => j === i ? { ...x, amount_cents: Math.round(Number(e.target.value) * 100) } : x))}/></label><button type="button" disabled={s.items.length === 1} onClick={() => set('items', s.items.filter((_, j) => j !== i))}>Rimuovi</button></div>)}<button type="button" disabled={s.items.length >= 40} onClick={() => set('items', [...s.items, { description: '', amount_cents: 0 }])}>Aggiungi servizio</button></fieldset>
   <div className="commercial-grid"><label>Imposta (%)<input type="number" min="0" max="100" step="0.01" required value={s.tax_bps / 100} onChange={e => set('tax_bps', Math.round(Number(e.target.value) * 100))}/></label><label>Descrizione imposta / regime<input required maxLength={500} placeholder="Indicare il regime applicabile" value={s.tax_label} onChange={e => set('tax_label', e.target.value)}/></label><label>Revisioni incluse<input type="number" min="0" max="100" required value={s.revisions} onChange={e => set('revisions', Number(e.target.value))}/></label>{s.percentages.map((part, i) => <label key={i}>Fase {i + 1} (%)<input type="number" min="1" max="98" required value={part} onChange={e => set('percentages', s.percentages.map((p, j) => j === i ? Number(e.target.value) : p))}/></label>)}</div>
   <div className="commercial-grid">{s.payment_due_days.map((days, i) => <label key={i}>Giorni per pagare la fase {i + 1}<input type="number" required min="1" max="365" value={days} onChange={e => set('payment_due_days', s.payment_due_days.map((d, j) => j === i ? Number(e.target.value) : d))}/></label>)}</div>
+  <p>Anteprima: imponibile {euro(amounts.subtotal)} · imposte {euro(amounts.tax)} · totale {euro(amounts.total)}. {amounts.instalments.map((amount,i) => `${['Avvio','Demo','Consegna'][i]} ${s.percentages[i]}%: ${euro(amount)}`).join(' · ')}. Importi definitivi ricalcolati dal server al salvataggio.</p>
   <p>Totale percentuali: {s.percentages.reduce((a, b) => a + b, 0)}%. Il server calcola imposte e tranche in centesimi e assegna alla terza tranche l’eventuale resto.</p>
   <div className="commercial-grid">{([['description', 'Descrizione dettagliata del progetto'], ['timeline', 'Tempistiche e decorrenza'], ['payment_terms', 'Condizioni e scadenze di pagamento'], ['responsibilities', 'Responsabilità delle parti'], ['delivery_terms', 'Condizioni di consegna'], ['exclusions', 'Esclusioni']] as const).map(([key, label]) => <label key={key}>{label}<textarea required minLength={2} maxLength={5000} rows={3} value={s[key]} onChange={e => set(key, e.target.value)}/></label>)}</div>
   <button type="submit" disabled={busy || s.percentages.reduce((a,b) => a+b,0) !== 100}>Salva bozza</button>
  </form>
 }
 
+function TemplateApproval({ template, run, busy }: { template: ContractTemplate; run: Run; busy: boolean }) {
+ const [reference, setReference] = useState(''), [confirmed, setConfirmed] = useState(false)
+ return <form className="commercial-form" onSubmit={e => { e.preventDefault(); void run(() => commercialCommand('approve_template', { id: template.id, confirmed, legal_reference: reference }), 'Approvazione registrata per questo modello.') }}>
+  <label>Riferimento alla revisione legale<input required minLength={6} maxLength={500} value={reference} onChange={e => setReference(e.target.value)} placeholder="Consulente, data e riferimento del documento"/></label>
+  <label className="commercial-check"><input type="checkbox" required checked={confirmed} onChange={e => setConfirmed(e.target.checked)}/>Confermo che questo modello è stato approvato dal consulente legale per l’utilizzo reale.</label>
+  <button disabled={busy || !confirmed}>Registra approvazione</button>
+ </form>
+}
+
 function TemplateEditor({ templates, run, busy }: { templates: ContractTemplate[]; run: Run; busy: boolean }) {
- const [title, setTitle] = useState(''), [body, setBody] = useState(''), [reference, setReference] = useState(''), [approved, setApproved] = useState(false)
+ const [title, setTitle] = useState(''), [body, setBody] = useState('')
  return <details className="commercial-card"><summary>Modelli contrattuali e approvazione legale</summary>
   <p>Inserisci il testo verificato dal tuo consulente. Dopo l’approvazione il modello è immutabile; per cambiare il testo crea un nuovo modello. I dati commerciali saranno allegati automaticamente.</p>
   <form className="commercial-form" onSubmit={e => { e.preventDefault(); void run(async () => { await commercialCommand('template', { title, body }); setTitle(''); setBody('') }, 'Modello creato, in attesa di approvazione legale.') }}>
    <label>Nome e versione<input required maxLength={160} value={title} onChange={e => setTitle(e.target.value)}/></label><label>Testo contrattuale<textarea required minLength={20} maxLength={30000} rows={8} value={body} onChange={e => setBody(e.target.value)}/></label><button disabled={busy}>Crea modello</button>
   </form>
-  {templates.map(t => <details key={t.id}><summary>{t.title} · {t.approved_at ? `Approvato ${date(t.approved_at)}` : 'Da approvare'}</summary><p className="commercial-pre">{t.body}</p>{t.approved_at ? <p>Riferimento: {t.legal_reference}</p> : <form className="commercial-form" onSubmit={e => { e.preventDefault(); void run(() => commercialCommand('approve_template', { id: t.id, confirmed: approved, legal_reference: reference }), 'Approvazione registrata.') }}><label>Riferimento alla revisione legale<input required minLength={6} maxLength={500} value={reference} onChange={e => setReference(e.target.value)} placeholder="Consulente, data e riferimento del documento"/></label><label className="commercial-check"><input type="checkbox" required checked={approved} onChange={e => setApproved(e.target.checked)}/>Confermo che il testo è stato approvato dal consulente legale per l’utilizzo reale.</label><button disabled={busy || !approved}>Registra approvazione</button></form>}</details>)}
+  {templates.map(t => <details key={t.id}><summary>{t.title} · {t.approved_at ? `Approvato ${date(t.approved_at)}` : 'Da approvare'}</summary><p className="commercial-pre">{t.body}</p>{t.approved_at ? <p>Riferimento: {t.legal_reference}</p> : <TemplateApproval template={t} run={run} busy={busy}/>}</details>)}
  </details>
 }
 
-function OfferCard({ offer: o, admin, features, run, busy, edit, templates }: { templates: ContractTemplate[]; offer: Offer; admin: boolean; features: CommercialFeatures; run: Run; busy: boolean; edit: (offer: Offer) => void }) {
+function OfferCard({ offer: o, admin, features, run, busy, edit, templates, onVersionCreated }: { onVersionCreated: (id: string) => void; templates: ContractTemplate[]; offer: Offer; admin: boolean; features: CommercialFeatures; run: Run; busy: boolean; edit: (offer: Offer) => void }) {
  const [confirmed, setConfirmed] = useState(false), [contractConfirmed, setContractConfirmed] = useState(false)
  const [releaseId, setReleaseId] = useState(''), [message, setMessage] = useState(''), [url, setUrl] = useState(''), [protection, setProtection] = useState('')
  const [action, setAction] = useState('update'), [phase, setPhase] = useState(2), [resolution, setResolution] = useState('')
@@ -84,7 +101,8 @@ function OfferCard({ offer: o, admin, features, run, busy, edit, templates }: { 
    {([['timeline','Tempistiche'],['payment_terms','Pagamenti'],['responsibilities','Responsabilità'],['delivery_terms','Consegna'],['exclusions','Esclusioni']] as const).map(([key,label]) => <p className="commercial-pre" key={key}><strong>{label}:</strong> {o.snapshot[key]}</p>)}
    <p>{o.snapshot.instalments.map((amount, i) => `Fase ${i + 1}: ${o.snapshot.percentages[i]}% (${euro(amount)}), scadenza ${o.snapshot.payment_due_days[i]} giorni dalla richiesta`).join(' · ')}</p>
   </details>
-  <div className="commercial-actions"><button disabled={busy} onClick={() => void run(() => downloadCommercialDocument(o.id, 'quote'))}>Scarica preventivo PDF</button>{admin && o.status === 'BOZZA' && <><button disabled={busy} onClick={() => edit(o)}>Modifica bozza</button><button disabled={busy || !templates.some(t => t.id === o.template_id && t.approved_at) || new Date(o.expires_at).getTime() <= Date.now()} onClick={() => void send('send', {}, 'Preventivo pubblicato. Notifica inserita nella coda email.')}>Pubblica e invia preventivo</button></>}{admin && o.status !== 'BOZZA' && <button disabled={busy} onClick={() => void send('version', {}, 'Nuova bozza creata. Gli originali restano invariati.')}>Crea nuova versione</button>}</div>
+  <div className="commercial-actions"><button disabled={busy} onClick={() => void run(() => downloadCommercialDocument(o.id, 'quote'))}>Scarica preventivo PDF</button>{admin && o.status === 'BOZZA' && <><button disabled={busy} onClick={() => edit(o)}>Modifica bozza</button><button disabled={busy || !templates.some(t => t.id === o.template_id && t.approved_at) || new Date(o.expires_at).getTime() <= Date.now()} onClick={() => void send('send', {}, 'Preventivo pubblicato. Notifica inserita nella coda email.')}>Pubblica e invia preventivo</button></>}{admin && o.status !== 'BOZZA' && <button disabled={busy} onClick={() => void run(async () => { const result = await commercialCommand('version', { offer_id: o.id }); if (result.id) onVersionCreated(result.id) }, 'Nuova versione creata. Gli originali restano invariati.')}>Crea nuova versione</button>}</div>
+  {admin && o.status !== 'BOZZA' && <p>Notifica preventivo: {o.emails.find(e => e.kind === 'quote_available')?.status ?? 'nessun invio registrato'}. Il preventivo pubblicato è disponibile nell’area cliente anche se la notifica è in attesa.</p>}
   {admin && o.status === 'BOZZA' && <p>{!templates.some(t => t.id === o.template_id && t.approved_at) ? 'Invio bloccato: approva il modello contrattuale in Impostazioni.' : new Date(o.expires_at).getTime() <= Date.now() ? 'Invio bloccato: aggiorna la scadenza della bozza.' : 'La pubblicazione rende l’offerta visibile al cliente e accoda la notifica email.'}{!features.email && ' Invio email disabilitato: il cliente può consultare l’offerta pubblicata nella propria area.'}</p>}
   {!admin && o.status === 'INVIATO' && <div className="commercial-form"><label className="commercial-check"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)}/>Ho letto il preventivo e accetto servizi, prezzi e condizioni indicati.</label><div className="commercial-actions"><button disabled={busy || !confirmed} onClick={() => void send('accept', { confirmed }, 'Preventivo accettato. Leggi e accetta il contratto generato.')}>Accetta preventivo</button><button disabled={busy} onClick={() => void send('reject')}>Rifiuta preventivo</button></div></div>}
   {o.contract && <section><p>Accettazione tracciata tramite account autenticato, data e impronta dei termini; non è una firma elettronica qualificata.</p><h4>Contratto · {o.contract.accepted_at ? `Accettato ${date(o.contract.accepted_at)}` : 'Da accettare'}</h4><details><summary>Leggi il contratto</summary><p>I servizi, importi e condizioni del preventivo qui sopra sono parte integrante di questo contratto.</p><p className="commercial-pre">{o.contract.body}</p><p className="commercial-hash">Impronta dei termini: {o.contract.snapshot_hash}</p></details><button disabled={busy} onClick={() => void run(() => downloadCommercialDocument(o.id, 'contract'))}>Scarica contratto PDF</button>{!admin && !o.contract.accepted_at && <div className="commercial-form"><label className="commercial-check"><input type="checkbox" checked={contractConfirmed} onChange={e => setContractConfirmed(e.target.checked)}/>Ho letto e accetto il contratto e il preventivo allegato, identificati dall’impronta indicata.</label><button disabled={busy || !contractConfirmed} onClick={() => void send('accept_contract', { confirmed: contractConfirmed, snapshot_hash: o.contract!.snapshot_hash })}>Accetta contratto e procedi</button></div>}</section>}
@@ -107,7 +125,7 @@ export function CommercialPanel({ admin = false, customers = [], requests = [], 
  const [emailTemplates, setEmailTemplates] = useState<Record<string, {subject:string;message:string}>>({})
  const [search, setSearch] = useState(''), [statusFilter, setStatusFilter] = useState('')
  const [requestDraft, setRequestDraft] = useState(initialRequest)
- const [editor, setEditor] = useState<Offer | 'new' | null>(initialRequest ? 'new' : null)
+ const [editor, setEditor] = useState<Offer | 'new' | null>(() => initialRequest ? overview?.offers.find(o => o.request_id === initialRequest.id && o.status === 'BOZZA') ?? 'new' : null)
  useEffect(() => {
   let active = true
   commercialFetch<CommercialFeatures>('status').then(async f => {
@@ -128,7 +146,7 @@ export function CommercialPanel({ admin = false, customers = [], requests = [], 
  const onChangedRef = useRef(onChanged)
  const backgroundBusy = useRef(false)
  const operationLock = useRef(false)
- const refreshBudget = useRef(12)
+ const versionDraftId = useRef<string | null>(null)
  const [syncNotice, setSyncNotice] = useState('')
  useEffect(() => { onChangedRef.current = onChanged }, [onChanged])
  useEffect(() => {
@@ -144,23 +162,22 @@ export function CommercialPanel({ admin = false, customers = [], requests = [], 
    finally { backgroundBusy.current = false }
   }
   const timer = window.setInterval(() => {
-   if (refreshBudget.current <= 0 || document.visibilityState !== 'visible') return
-   refreshBudget.current -= 1
+   if (document.visibilityState !== 'visible') return
    void refreshReadOnly()
-  }, 5000)
+  }, 15000)
   const onFocus = () => { void refreshReadOnly() }
   window.addEventListener('focus', onFocus)
-  return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
+  document.addEventListener('visibilitychange', onFocus)
+  return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus) }
  }, [features?.backend, busy, editor, admin, setData])
  const run: Run = async (operation, success) => {
   if (operationLock.current) return
   operationLock.current = true
-  refreshBudget.current = 12
   setBusy(true); setError(''); setNotice('')
   try {
    await operation()
    if (success) setNotice(success)
-   try { const status = await commercialFetch<CommercialFeatures>('status'); setFeatures(status); setData(status.backend ? await loadCommercial(admin ? 'admin' : 'customer') : null); await onChanged?.() } catch { setError('Operazione eseguita, ma i dati non si sono aggiornati. Ricarica la pagina prima di riprovare.') }
+   try { const status = await commercialFetch<CommercialFeatures>('status'); setFeatures(status); const next = status.backend ? await loadCommercial(admin ? 'admin' : 'customer') : null; setData(next); if (versionDraftId.current && next) { const draft = next.offers.find(o => o.id === versionDraftId.current); if (draft) { setEditor(draft); versionDraftId.current = null } } await onChanged?.() } catch { setError('Operazione eseguita, ma i dati non si sono aggiornati. Ricarica la pagina prima di riprovare.') }
   } catch (reason) { setError(reason instanceof Error ? reason.message : 'Operazione non riuscita.') }
   finally { operationLock.current = false; setBusy(false) }
  }
@@ -169,7 +186,7 @@ export function CommercialPanel({ admin = false, customers = [], requests = [], 
   {syncNotice && <p role="status">{syncNotice}</p>}
   {!admin && new URLSearchParams(window.location.search).get('payment') === 'processing' && <p className="auth-notice" role="status">Ritorno da Stripe: consulta lo stato delle rate qui sotto. L’esito è confermato dal server, non dal reindirizzamento.</p>}
   {!admin && new URLSearchParams(window.location.search).get('payment') === 'cancelled' && <p className="auth-notice">Checkout interrotto. Consulta la rata: se ancora dovuta puoi riprendere il pagamento.</p>}
-  {features?.backend && <p>Gli stati si aggiornano per un minuto e al ritorno nella finestra. Puoi sempre usare Aggiorna.</p>}
+  {features?.backend && <p>Gli stati si aggiornano ogni 15 secondi mentre la pagina è visibile e al ritorno nella finestra. Puoi sempre usare Aggiorna.</p>}
   {error && <p className="field-error" role="alert">{error}</p>}{notice && <p className="auth-notice" role="status">{notice}</p>}
   {features && !features.backend && <p>La gestione di preventivi, contratti e pagamenti sarà disponibile dopo l’attivazione del servizio. Le tue richieste e i progetti esistenti restano consultabili.</p>}
   {!features && !error && <p role="status">Caricamento…</p>}
@@ -178,10 +195,10 @@ export function CommercialPanel({ admin = false, customers = [], requests = [], 
   {features && admin && view === 'settings' && <div className="commercial-card"><p>Backend: {features.backend ? 'attivo' : 'disabilitato o configurazione mancante'} · Stripe: {features.payments ? features.stripeMode : 'disabilitato'} · Resend: {features.email ? 'attivo' : 'disabilitato'}</p><p>Le credenziali si configurano esclusivamente su Vercel. Lo stato delle flag non certifica credenziali, webhook o migrazioni.</p></div>}
   {admin && view === 'settings' && <StripeDiagnostics/>}
   {admin && view === 'communications' && Object.keys(emailTemplates).length > 0 && <details className="commercial-card"><summary>Template automatici in uso</summary>{Object.entries(emailTemplates).map(([kind, copy]) => <div key={kind}><h3>{copy.subject}</h3><p>{copy.message}</p></div>)}<p>Ogni invio include cliente, progetto e collegamento alla sua area riservata. Gli importi e gli aggiornamenti derivano dall’operazione registrata.</p></details>}
-  {data && features && <>{admin && <><div className="commercial-actions">{['all','quotes'].includes(view) && <button disabled={busy} onClick={() => { setRequestDraft(undefined); setEditor('new') }}>Nuovo preventivo</button>}{['all','communications'].includes(view) && <button disabled={busy || !features.email} onClick={() => void run(() => commercialFetch('emails', {}), 'Elaborazione della coda completata. Verifica gli esiti nello storico email.')}>{features.email ? 'Elabora coda email' : 'Email in attivazione'}</button>}</div>{['all','settings'].includes(view) && <TemplateEditor templates={data.templates} run={run} busy={busy}/>} {editor && <QuoteEditor key={editor === 'new' ? 'new' : editor.id} offer={editor === 'new' ? undefined : editor} templates={data.templates} customers={customers} requests={requests} defaults={defaults} initialRequest={editor === 'new' ? requestDraft : undefined} run={run} busy={busy} done={() => setEditor(null)}/>}</>}
+  {data && features && <>{admin && <><div className="commercial-actions">{['all','quotes'].includes(view) && <button disabled={busy} onClick={() => { setRequestDraft(undefined); setEditor('new') }}>Nuovo preventivo</button>}{['all','communications'].includes(view) && <button disabled={busy || !features.email} onClick={() => void run(() => commercialFetch('emails', {}), 'Elaborazione della coda completata. Verifica gli esiti nello storico email.')}>{features.email ? 'Elabora coda email' : 'Email in attivazione'}</button>}</div>{['all','settings'].includes(view) && <TemplateEditor templates={data.templates} run={run} busy={busy}/>} {editor && <QuoteEditor key={editor === 'new' ? 'new' : editor.id} offer={editor === 'new' ? undefined : editor} templates={data.templates} customers={customers} requests={requests} offers={data.offers} defaults={defaults} initialRequest={editor === 'new' ? requestDraft : undefined} run={run} busy={busy} done={() => setEditor(null)}/>}</>}
   {admin && view !== 'settings' && <div className="commercial-grid commercial-form"><label>Cerca cliente o progetto<input value={search} onChange={e => setSearch(e.target.value)}/></label><label>Stato preventivo<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">Tutti</option>{['BOZZA','INVIATO','ACCETTATO','RIFIUTATO','SCADUTO'].map(s => <option key={s}>{s}</option>)}</select></label></div>}
   {view !== 'settings' && visible.length === 0 && <p>Nessun risultato.</p>}
-  {admin && view === 'communications' ? visible.map(o => <article className="commercial-card" key={o.id}><h3>{o.snapshot.title} · {o.snapshot.customer.name}</h3>{o.emails.length === 0 && <p>Nessun invio.</p>}{o.emails.map(e => <p key={e.id}>{e.kind} · {e.status} · {e.recipient} · Tentativi: {e.attempts} · Inviata: {date(e.sent_at)}{e.last_error && ` · ${e.last_error}`}</p>)}<p>Gli invii in revisione richiedono la verifica dell’esito presso Resend prima di un nuovo invio, per evitare duplicati.</p></article>) : view !== 'settings' && visible.map(o => admin ? <article className="admin-offer-summary" id={`admin-offer-${o.id}`} key={o.id}><div className="admin-section-heading"><div><span className="admin-badge">{readable(o.status)} · v{o.version}</span><h3>{o.snapshot.title}</h3><p>{o.snapshot.customer.name} · {o.snapshot.customer.email}</p></div><strong>{euro(o.total_cents)}</strong></div>{view === 'payments' && <><PaymentPhases offer={o}/><p>{paymentDiagnosis(o)}</p><p>{o.payments.length} transazioni registrate · Gli importi delle rate non equivalgono a incassi.</p></>}<details><summary>Apri dettagli e operazioni {view === 'payments' ? 'di pagamento' : ''}</summary><OfferCard offer={o} admin={admin} features={features} run={run} busy={busy} edit={setEditor} templates={data.templates}/></details></article> : <OfferCard key={o.id} offer={o} admin={admin} features={features} run={run} busy={busy} edit={setEditor} templates={data.templates}/>)}
+  {admin && view === 'communications' ? visible.map(o => <article className="commercial-card" key={o.id}><h3>{o.snapshot.title} · {o.snapshot.customer.name}</h3>{o.emails.length === 0 && <p>Nessun invio.</p>}{o.emails.map(e => <p key={e.id}>{e.kind} · {e.status} · {e.recipient} · Tentativi: {e.attempts} · Inviata: {date(e.sent_at)}{e.last_error && ` · ${e.last_error}`}</p>)}<p>Gli invii in revisione richiedono la verifica dell’esito presso Resend prima di un nuovo invio, per evitare duplicati.</p></article>) : view !== 'settings' && visible.map(o => admin ? <article className="admin-offer-summary" id={`admin-offer-${o.id}`} key={o.id}><div className="admin-section-heading"><div><span className="admin-badge">{readable(o.status)} · v{o.version}</span><h3>{o.snapshot.title}</h3><p>{o.snapshot.customer.name} · {o.snapshot.customer.email}</p></div><strong>{euro(o.total_cents)}</strong></div>{view === 'payments' && <><PaymentPhases offer={o}/><p>{paymentDiagnosis(o)}</p><p>{o.payments.length} transazioni registrate · Gli importi delle rate non equivalgono a incassi.</p></>}<details><summary>Apri dettagli e operazioni {view === 'payments' ? 'di pagamento' : ''}</summary><OfferCard offer={o} admin={admin} features={features} run={run} busy={busy} edit={setEditor} onVersionCreated={id => { versionDraftId.current = id }} templates={data.templates}/></details></article> : <OfferCard key={o.id} offer={o} admin={admin} features={features} run={run} busy={busy} edit={setEditor} onVersionCreated={id => { versionDraftId.current = id }} templates={data.templates}/>)}
   </>}
  </section>
 }

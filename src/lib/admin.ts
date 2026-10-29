@@ -3,7 +3,7 @@ import { getSupabaseClient } from './supabase'
 export const leadStatuses = [
   ['nuovo', 'Nuovo'], ['da_contattare', 'Da contattare'], ['contattato', 'Contattato'],
   ['preventivo_inviato', 'Preventivo inviato'], ['trattativa', 'Trattativa'],
-  ['accettato', 'Accettato'], ['rifiutato', 'Rifiutato'], ['chiuso', 'Chiuso'],
+  ['accettato', 'Accettato internamente'], ['rifiutato', 'Rifiutato'], ['chiuso', 'Chiuso'],
 ] as const
 export const projectStatuses = [
   ['pianificato', 'Pianificato'], ['in_lavorazione', 'In lavorazione'],

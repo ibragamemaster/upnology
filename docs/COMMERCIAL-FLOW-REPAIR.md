@@ -51,3 +51,13 @@ Prossimo passo: predisporre deployment Test, progetto Supabase separato e sandbo
 - La pulizia dello storage dopo l'invio della richiesta non trasforma più un salvataggio confermato in un falso errore.
 
 Nessuna modifica remota. Il test locale avviato prima dell'ultima istruzione è stato interrotto. Le modifiche successive non sono dichiarate collaudate; servono applicazione delle migrazioni in ambiente autorizzato e verifica reale del percorso con i provider.
+
+## Precompilazione preventivi e modelli
+
+La bozza recupera servizi, descrizione, tempi e brief dalla richiesta persistita; i campi AI vengono mostrati se presenti nei dati raccolti. Il budget resta un riferimento e non viene convertito automaticamente in prezzo. I dati fiscali già disponibili vengono recuperati dalle offerte dello stesso cliente; cambiare cliente non conserva quelli del precedente. Le descrizioni oltre il limite SQL di 5.000 caratteri sono segnalate e il brief completo resta consultabile.
+
+La preparazione dalla richiesta riapre la bozza esistente. Per un documento già emesso si usa la versione collegata, che viene aperta nell’editor dopo la creazione. Ogni modello ha conferma e riferimento legale indipendenti; l’approvazione obbligatoria resta controllata dal server. Il modello viene preselezionato solo se ne esiste esattamente uno approvato.
+
+Le schermate visibili rileggono il backend ogni 15 secondi (con pausa durante editing/operazioni) e al ritorno nella finestra, senza il precedente limite di un minuto. L’anteprima delle tranche applica gli stessi arrotondamenti del server; importi e scadenze definitivi continuano a essere determinati dalle RPC esistenti.
+
+Verifiche di questo intervento: TypeScript mirato superato; due test mirati sulla precompilazione e gli arrotondamenti superati. Nessuna build generale, pagamento o chiamata remota. Questo non costituisce un collaudo Stripe/webhook end-to-end.

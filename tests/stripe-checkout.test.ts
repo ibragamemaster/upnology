@@ -2,7 +2,7 @@ import { test, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createCheckout, fiscalOptions, type Attempt } from '../server/payments.ts'
+import { createCheckout, fiscalOptions, stripeClient, type Attempt } from '../server/payments.ts'
 import { features } from '../server/config.ts'
 
 test('Checkout SDK request uses persisted 300 EUR, linkage, stable idempotency and safe fiscal defaults', async () => {
@@ -50,7 +50,6 @@ test('Checkout SDK request uses persisted 300 EUR, linkage, stable idempotency a
 })
 
 test('restricted keys support both modes, reject mismatches, and remain disabled without activation', async () => {
- const { stripeClient } = await import('../server/payments.ts')
  const previous={...process.env}
  try {
   Object.assign(process.env,{COMMERCIAL_ENABLED:'true',SUPABASE_URL:'https://example.supabase.co',SUPABASE_ANON_KEY:'fixture',SUPABASE_SERVICE_ROLE_KEY:'fixture',APP_URL:'https://upnology.agency',STRIPE_WEBHOOK_SECRET:'whsec_fixture',STRIPE_ENABLED:'true'})
@@ -58,7 +57,7 @@ test('restricted keys support both modes, reject mismatches, and remain disabled
    process.env.STRIPE_MODE=mode
    for(const kind of ['rk','sk']) {
     process.env.STRIPE_SECRET_KEY=`${kind}_${mode}_fixture`
-    assert.ok(stripeClient() instanceof Stripe) // Client construction only; no network requests.
+    assert.equal(typeof stripeClient().checkout.sessions.create, 'function') // SDK factory construction only; no network requests.
     assert.equal(features().payments,true)
    }
    process.env.STRIPE_SECRET_KEY=`rk_${mode==='live'?'test':'live'}_fixture`

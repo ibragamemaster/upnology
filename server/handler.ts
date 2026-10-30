@@ -1,9 +1,10 @@
+import { buildPipeline } from './workspace.ts'
 import { waitUntil } from '@vercel/functions'
 import { timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { features, HttpError, protectedLink, stripeConfigurationChecks } from './config.ts'
 import { rpc, service, userClient } from './database.ts'
-import { createCheckout, handleStripeWebhook, reconcileCheckout } from './payments.ts'
+import { createCheckout, handleStripeWebhook, reconcileCheckout, syncPaymentAttempt, type Attempt } from './payments.ts'
 import { deliverEmails, emailCopy } from './emails.ts'
 import { paymentReceipt, requestRefund } from './paymentOperations.ts'
 import { renderDocument } from './documents.ts'
@@ -41,6 +42,10 @@ async function route(request: Request): Promise<Response> {
   return Response.json({ expired, email: f.email ? await deliverEmails() : { disabled: true } })
  }
  const client = await userClient(request)
+ if (path === '/api/commercial/workspace' && request.method === 'GET') {
+  const snapshot = await rpc<{ workspace: { quotes: Parameters<typeof buildPipeline>[0] }; commercial: CommercialOverview; generated_at: string }>(client, 'commercial_workspace_v2')
+  return Response.json({ ...snapshot, version: 2, pipeline: buildPipeline(snapshot.workspace.quotes, snapshot.commercial, Date.parse(snapshot.generated_at)) })
+ }
  if (path === '/api/commercial/stripe-diagnostics' && request.method === 'GET') {
   if (await rpc<boolean>(client, 'admin_access') !== true) throw new HttpError(403, 'Accesso admin richiesto.')
   return Response.json({ payments: f.payments, checks: stripeConfigurationChecks() })
@@ -58,6 +63,13 @@ async function route(request: Request): Promise<Response> {
   const { action, data } = command.parse(await jsonBody(request))
   if (['release', 'prepare_delivery', 'delivery'].includes(action)) data.url = protectedLink(z.string().parse(data.url))
   const result = await rpc(client, 'commercial_command', { p_action: action, p_data: data })
+  if (f.email) waitUntil(deliverEmails().catch(() => { console.warn('Commercial email worker deferred; jobs remain in outbox') }))
+  return Response.json(result)
+ }
+ if (path === '/api/commercial/payment-status' && request.method === 'POST') {
+  const { attempt_id } = z.object({ attempt_id: uuid }).parse(await jsonBody(request))
+  const attempt = await rpc<Attempt>(client, 'customer_payment_attempt', { p_attempt: attempt_id })
+  const result = await syncPaymentAttempt(attempt)
   if (f.email) waitUntil(deliverEmails().catch(() => { console.warn('Commercial email worker deferred; jobs remain in outbox') }))
   return Response.json(result)
  }

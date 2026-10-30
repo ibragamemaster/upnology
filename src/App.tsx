@@ -3,6 +3,7 @@ import { activeServices } from './content/services'
 import { SiteFooter, SiteHeader } from './components/SiteHeader'
 import { AboutPage, ContactsPage, MarketingPage, ProjectsPage, QuotePage, ServicesPage } from './pages/Pages'
 import { AccountPage, AuthPage } from './pages/AuthPages'
+import { WorkspacePage } from './pages/WorkspacePage'
 import { AdminPage } from './pages/AdminPage'
 import { PublicMotion } from './components/PublicMotion'
 import { EmmaPresence } from './components/EmmaPresence'
@@ -119,6 +120,7 @@ function App() {
   if (route === '/demo/streetwear' || route === '/demo/streetwear/carrello' || route === '/demo/streetwear/riepilogo' || route.startsWith('/demo/streetwear/prodotto/')) return <Suspense fallback={<main role="status">Caricamento demo…</main>}><DemoPages type="streetwear" path={route} /></Suspense>
   if (route === '/demo/automotive' || route === '/demo/automotive/confronta' || route.startsWith('/demo/automotive/auto/')) return <Suspense fallback={<main role="status">Caricamento demo…</main>}><AutomotiveDemo path={route} /></Suspense>
   if (route === '/demo/architettura' || route === '/demo/architettura/raccontaci' || route.startsWith('/demo/architettura/progetto/')) return <Suspense fallback={<main role="status">Caricamento demo…</main>}><ArchitectureDemo path={route} /></Suspense>
+  if (route === '/admin/workspace') return <WorkspacePage />
   if (route === '/') return <HomePage />
   const page = route === '/servizi' ? <ServicesPage /> : route === '/preventivo' || route === '/inizia-progetto' ? <QuotePage /> : route === '/marketing' ? <MarketingPage /> : route === '/progetti' ? <ProjectsPage /> : route === '/contatti' ? <ContactsPage /> : route === '/chi-siamo' ? <AboutPage /> : route === '/login' ? <AuthPage mode="login" /> : route === '/signup' ? <AuthPage mode="signup" /> : route === '/forgot-password' ? <AuthPage mode="forgot" /> : route === '/reset-password' ? <AuthPage mode="reset" /> : route === '/account' ? <AccountPage /> : route === '/admin' ? <AdminPage /> : route === '/ai' ? <Suspense fallback={<main className="page-shell" role="status">Caricamento Upnology AI…</main>}><AiPage /></Suspense> : <main className="page-shell not-found"><h1>Pagina non trovata.</h1><a className="button-primary" href="/">Torna alla Home ↗</a></main>
   const showEmma = ['/servizi', '/marketing', '/progetti', '/chi-siamo', '/ai'].includes(route)

@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { appOrigin, features, HttpError } from './config.ts'
 import { rpc, service } from './database.ts'
 
-export type Attempt = { project_id: string; customer_user_id: string; integration_version: number; id: string; milestone_id: string; offer_id: string; phase: number; amount_cents: number; expires_at: string; session_id: string | null; status: string; title: string; email: string }
+export type Attempt = { checkout_revision?: number; project_id: string; customer_user_id: string; integration_version: number; id: string; milestone_id: string; offer_id: string; phase: number; amount_cents: number; expires_at: string; session_id: string | null; status: string; title: string; email: string }
 export function stripeClient() {
  const key = process.env.STRIPE_SECRET_KEY ?? ''
  const live = process.env.STRIPE_MODE === 'live'
@@ -45,7 +45,10 @@ export async function createCheckout(client: SupabaseClient, milestone: string, 
   const session = await stripe.checkout.sessions.retrieve(attempt.session_id)
   validateSession(session, attempt)
   if (session.status === 'open' && session.url) return { url: session.url }
-  if (session.status !== 'expired') throw new HttpError(409, 'Pagamento in verifica. Attendi la conferma del server.')
+  if (session.status !== 'expired') {
+   await syncPaymentAttempt(attempt, { stripe, persist })
+   return { url: `${origin}/account?payment=processing&attempt=${attempt.id}#offer-${attempt.offer_id}` }
+  }
   await persist('checkout_expired', { attempt_id: attempt.id, session_id: session.id })
   attempt = await reserve(client, milestone)
  }
@@ -56,12 +59,12 @@ export async function createCheckout(client: SupabaseClient, milestone: string, 
  const session = await stripe.checkout.sessions.create({
   ...fiscal,
   ...(fiscal.invoice_creation?.enabled ? { customer_creation: 'always' as const, invoice_creation: { enabled: true, invoice_data: { metadata } } } : {}),
-  mode: 'payment', allowed_payment_method_types: ['card'], customer_email: attempt.email,
+  mode: 'payment', ...(attempt.checkout_revision === 2 ? {} : { allowed_payment_method_types: ['card'] as Stripe.Checkout.SessionCreateParams['allowed_payment_method_types'] }), customer_email: attempt.email,
   client_reference_id: attempt.id,
   metadata,
   payment_intent_data: { metadata },
   line_items: [{ quantity: 1, price_data: { currency: 'eur', unit_amount: attempt.amount_cents, product_data: { name: `Upnology · ${attempt.title.slice(0, 120)} · Fase ${attempt.phase}` } } }],
-  success_url: `${origin}/account?payment=processing`, cancel_url: `${origin}/account?payment=cancelled`,
+  success_url: `${origin}/account?payment=processing${attempt.checkout_revision === 2 ? `&attempt=${attempt.id}#offer-${attempt.offer_id}` : ''}`, cancel_url: `${origin}/account?payment=cancelled${attempt.checkout_revision === 2 ? `&attempt=${attempt.id}#offer-${attempt.offer_id}` : ''}`,
   expires_at: expires,
  }, { idempotencyKey: `upnology-checkout-${attempt.id}` })
  validateSession(session, attempt)
@@ -128,4 +131,19 @@ export async function reconcileCheckout(attemptId: string, sessionId: string) {
   await service('stripe_event', { ...state, event_id: `reconcile:${session.id}:${state.state}:${state.refunded_cents}`, event_type: 'admin.reconciliation' })
  }
  return { reconciled: true }
+}
+
+// Caller must obtain the attempt through the owner-scoped RPC, never from request JSON.
+export async function syncPaymentAttempt(attempt: Attempt, dependencies: Pick<PaymentDependencies, 'stripe' | 'persist'> = {}) {
+ if (!attempt.session_id) throw new HttpError(409, 'Sessione Stripe non ancora collegata. Riprova il pagamento per recuperare lo stesso tentativo.')
+ const stripe = dependencies.stripe ?? stripeClient(), persist = dependencies.persist ?? service
+ const session = await stripe.checkout.sessions.retrieve(attempt.session_id, { expand: ['payment_intent.latest_charge'] })
+ validateSession(session, attempt)
+ const state = normalizedPayment(session)
+ if (session.status === 'open' && state.state === 'pending') {
+  await persist('checkout_bound', { ...state, url: session.url })
+  return { status: 'open' }
+ }
+ await persist('stripe_event', { ...state, event_id: `reconcile:${session.id}:${state.state}:${state.refunded_cents}`, event_type: 'customer.reconciliation' })
+ return { status: state.state }
 }

@@ -6,7 +6,11 @@ export async function rpc<T>(client: SupabaseClient, name: string, args: Record<
   // Never expose SQL, credentials, or provider response bodies to the browser.
   if (error.code === '42501') throw new HttpError(403, 'Operazione non autorizzata.')
   if (error.code === 'P0001' || error.code === '22023') throw new HttpError(409, error.message)
-  if (['PGRST202', '42P01', '42883'].includes(error.code)) throw new HttpError(503, 'Sistema commerciale non ancora attivato nel database.')
+  if (['PGRST202', '42P01', '42883', '42703'].includes(error.code)) {
+   if (name === 'commercial_workspace_v2') throw new HttpError(503, 'Schema Workspace 2.0 incompleto: verificare la migrazione 20261030000000_commercial_workspace_v2 e le sue dipendenze nel progetto Supabase configurato.')
+   if (name === 'customer_payment_attempt') throw new HttpError(503, 'Recupero pagamenti non disponibile: verificare la migrazione 20261030010000_checkout_recovery nel progetto Supabase configurato.')
+   throw new HttpError(503, 'Schema commerciale incompleto: verificare le migrazioni nel progetto Supabase configurato.')
+  }
   throw new HttpError(503, 'Operazione non riuscita. Riprova o contatta l’amministratore.')
  }
  return data as T

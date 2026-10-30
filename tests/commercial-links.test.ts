@@ -1,11 +1,15 @@
-import { test } from 'node:test'
+import { test, mock } from 'node:test'
+import Stripe from 'stripe'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createCheckout, handleStripeWebhook, syncPaymentAttempt, type Attempt } from '../server/payments.ts'
+import { buildPipeline } from '../server/workspace.ts'
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
 import { milestoneAction } from '../src/domain/commercialFlow.ts'
 import type { Offer, Milestone } from '../src/domain/commercial.ts'
 
-test('local only: verified request ownership and request status do not create financial records', async () => {
+test('isolated flow: request, quote, contract, three Checkouts, signed webhooks, shared panels and delivery', async () => {
  const db = new PGlite()
  try {
   await db.exec(`create role anon; create role authenticated; create role service_role;
@@ -91,6 +95,85 @@ test('local only: verified request ownership and request status do not create fi
   assert.equal(adminOffer.payments.length,1)
   assert.equal(adminOffer.payments[0].status,'creating')
   assert.ok(adminOffer.milestones.every(m => !m.paid_at))
+  const workspace = (await db.query<{value:{workspace:{quotes:Parameters<typeof buildPipeline>[0]};commercial:{offers:Offer[];templates:[]}}}>('select public.commercial_workspace_v2() value')).rows[0].value
+  assert.equal(buildPipeline(workspace.workspace.quotes,workspace.commercial).find(row => row.offer_id === saved.id)?.stage,'payment')
+  await assert.rejects(() => db.query('select public.customer_payment_attempt($1)',[attempt.id]),/Payment unavailable/)
+  await role(bob)
+  await assert.rejects(() => db.query('select public.commercial_workspace_v2()'),/Admin access required/)
+  assert.equal((await db.query<{value:Attempt}>('select public.customer_payment_attempt($1) value',[attempt.id])).rows[0].value.checkout_revision,2)
+
+  // One isolated end-to-end SQL path; Stripe transport is mocked, signatures are verified.
+  const previous = {...process.env}
+  const stripe = new Stripe('sk_test_local_fixture')
+  let canonical: Stripe.Checkout.Session
+  const create = mock.method(stripe.checkout.sessions,'create',async (params:Stripe.Checkout.SessionCreateParams) => {
+   assert.equal(params.allowed_payment_method_types,undefined)
+   assert.match(params.success_url!,/attempt=/)
+   canonical = {id:`cs_test_${params.metadata!.attempt_id}`,mode:'payment',livemode:false,status:'open',url:'https://checkout.stripe.com/local-fixture',metadata:params.metadata,amount_total:params.line_items![0].price_data!.unit_amount,currency:'eur',payment_status:'unpaid'} as Stripe.Checkout.Session
+   return canonical
+  })
+  const retrieve = mock.method(stripe.checkout.sessions,'retrieve',async () => canonical)
+  const persist = async (action:string,data:Record<string,unknown>) => {
+   await db.exec('reset role')
+   await db.query("select set_config('request.jwt.claim.role','service_role',false)")
+   await db.exec('set role service_role')
+   try { return await db.query('select public.commercial_service($1,$2::jsonb)',[action,JSON.stringify(data)]) }
+   finally { await role(bob) }
+  }
+  try {
+   Object.assign(process.env,{APP_URL:'https://upnology.example',STRIPE_MODE:'test',STRIPE_WEBHOOK_SECRET:'whsec_local_fixture'})
+   delete process.env.STRIPE_TAX_ENABLED; delete process.env.STRIPE_SANDBOX_INVOICES
+   for (const phase of [1,2,3]) {
+    offer = (await read())[0]
+    const milestone = offer.milestones.find(m => m.phase === phase)!
+    const reserveAttempt = async () => (await db.query<{value:Attempt}>('select public.commercial_checkout($1) value',[milestone.id])).rows[0].value
+    const dependencies = {stripe,persist,reserve:reserveAttempt}
+    await createCheckout({} as SupabaseClient,milestone.id,dependencies)
+    await createCheckout({} as SupabaseClient,milestone.id,dependencies) // Reuses open Checkout after cancellation.
+    assert.equal(create.mock.callCount(),phase)
+    assert.equal((await read())[0].milestones.find(m => m.id===milestone.id)!.paid_at,null)
+    if (phase===1) {
+     canonical!.payment_intent={id:'pi_local_failure',object:'payment_intent',status:'requires_payment_method',last_payment_error:{message:'Local declined fixture'}} as Stripe.PaymentIntent
+     await syncPaymentAttempt(await reserveAttemptForRead(milestone.id),{stripe,persist})
+     assert.equal((await read())[0].milestones.find(m=>m.id===milestone.id)!.status,'FALLITO')
+     await createCheckout({} as SupabaseClient,milestone.id,dependencies)
+     assert.equal(create.mock.callCount(),1)
+     canonical!.payment_intent=null
+    }
+    canonical!.status='complete';canonical!.payment_status='paid'
+    const event = JSON.stringify({id:`evt_local_${phase}`,type:'checkout.session.completed',livemode:false,data:{object:canonical!}})
+    const signature = stripe.webhooks.generateTestHeaderString({payload:event,secret:'whsec_local_fixture'})
+    const webhook = () => new Request('https://upnology.example/api/stripe/webhook',{method:'POST',headers:{'stripe-signature':signature},body:event})
+    await handleStripeWebhook(webhook(),{stripe,persist}); await handleStripeWebhook(webhook(),{stripe,persist})
+    await syncPaymentAttempt(await reserveAttemptForRead(milestone.id),{stripe,persist})
+    offer = (await read())[0]
+    assert.equal(offer.milestones.find(m => m.id===milestone.id)!.status,'PAGATO')
+    assert.equal(offer.payments.filter(p => p.milestone_id===milestone.id).length,1)
+    if (phase===1) assert.equal(offer.project!.status,'in_lavorazione')
+    await role(alice)
+    assert.deepEqual((await read()).find(o=>o.id===saved.id)!.milestones,offer.milestones)
+    if (phase<3) {
+     await cmd('release',{offer_id:saved.id,phase:phase+1,url:'https://delivery.example/protected',notes:'Local release for verification',protection_note:'Authenticated local fixture'})
+     await role(bob)
+     const released=(await read())[0]
+     await cmd('approve_release',{offer_id:saved.id,release_id:released.releases.find(r=>r.phase===phase+1)!.id,confirmed:true})
+     assert.equal((await read())[0].milestones.find(m=>m.phase===phase+1)!.status,'RICHIESTO')
+    } else {
+     await cmd('delivery',{offer_id:saved.id,url:'https://delivery.example/protected'})
+     await role(bob)
+     assert.ok((await read())[0].project!.delivered_at)
+    }
+   }
+  } finally {
+   create.mock.restore();retrieve.mock.restore()
+   for(const key of Object.keys(process.env)) if(!(key in previous)) delete process.env[key]
+   Object.assign(process.env,previous)
+  }
+  async function reserveAttemptForRead(milestoneId:string) {
+   const current=(await read())[0].payments.find(p=>p.milestone_id===milestoneId)!
+   return (await db.query<{value:Attempt}>('select public.customer_payment_attempt($1) value',[current.id])).rows[0].value
+  }
+
  } finally { await db.close() }
 })
 

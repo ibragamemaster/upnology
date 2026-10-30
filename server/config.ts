@@ -17,7 +17,7 @@ export function features() {
  const backend = process.env.COMMERCIAL_ENABLED === 'true' && !!process.env.SUPABASE_URL && !!process.env.SUPABASE_ANON_KEY
  const payments = backend && stripeConfigurationChecks().every(check => check.ok)
  const email = backend && process.env.RESEND_ENABLED === 'true' && !!process.env.RESEND_API_KEY && !!process.env.RESEND_FROM && !!process.env.APP_URL && !!supabaseSecretKey()
- return { backend, payments, email, stripeMode: payments ? process.env.STRIPE_MODE : null }
+ return { backend, payments, email, stripeMode: payments ? process.env.STRIPE_MODE : null, workspaceVersion: 2 }
 }
 // Fixed messages only: never serialize environment values or URL parsing errors.
 export function stripeConfigurationChecks() {

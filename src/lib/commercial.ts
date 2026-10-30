@@ -1,6 +1,6 @@
 import { getSupabaseClient } from './supabase'
 import type { CommercialOverview } from '../domain/commercial'
-export type CommercialFeatures = { backend: boolean; payments: boolean; email: boolean; stripeMode: string | null }
+export type CommercialFeatures = { backend: boolean; payments: boolean; email: boolean; stripeMode: string | null; workspaceVersion?: number }
 export async function commercialFetch<T>(path: string, data?: unknown): Promise<T> {
  const { data: { session } } = await getSupabaseClient().auth.getSession()
  const response = await fetch(`/api/commercial/${path}`, {
